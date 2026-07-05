@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Rogue Tides — Pirate Ship 3D</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="hud">
+        <div id="hud-top-left">
+          <div id="health-bar"><div id="health-fill"></div></div>
+          <div id="gold-counter">🪙 <span id="gold-amount">0</span></div>
+        </div>
+        <div id="hud-top-right">
+          <div id="ship-name">Sea Sprite</div>
+        </div>
+        <div id="message-banner"></div>
+      </div>
+
+      <div id="shipyard" class="hidden">
+        <div id="shipyard-panel">
+          <h2>Shipyard</h2>
+          <div class="upgrade-row" data-upgrade="sails">
+            <div class="upgrade-info">
+              <div class="upgrade-title">Sails <span class="upgrade-level"></span></div>
+              <div class="upgrade-desc">Increases top speed &amp; acceleration</div>
+            </div>
+            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+          </div>
+          <div class="upgrade-row" data-upgrade="cannons">
+            <div class="upgrade-info">
+              <div class="upgrade-title">Cannons <span class="upgrade-level"></span></div>
+              <div class="upgrade-desc">More damage, faster reload &amp; an extra cannon slot to place</div>
+            </div>
+            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+          </div>
+          <div class="upgrade-row" data-upgrade="hull">
+            <div class="upgrade-info">
+              <div class="upgrade-title">Hull <span class="upgrade-level"></span></div>
+              <div class="upgrade-desc">Increases max health</div>
+            </div>
+            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+          </div>
+          <div class="upgrade-row" data-upgrade="powder">
+            <div class="upgrade-info">
+              <div class="upgrade-title">Powder Kegs <span class="upgrade-level"></span></div>
+              <div class="upgrade-desc">Gain a temporary speed &amp; fire-rate boost powerup</div>
+            </div>
+            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+          </div>
+          <div id="cannon-builder">
+            <h3>Cannon Placement <span id="cannon-slots-label"></span></h3>
+            <div class="cannon-builder-row">
+              <div class="cannon-slot" data-side="left">
+                <div class="cannon-slot-label">⬅ Port</div>
+                <div class="cannon-slot-controls">
+                  <button class="slot-btn slot-minus">−</button>
+                  <span class="slot-count">0</span>
+                  <button class="slot-btn slot-plus">+</button>
+                </div>
+              </div>
+              <div class="cannon-slot" data-side="front">
+                <div class="cannon-slot-label">⬆ Bow</div>
+                <div class="cannon-slot-controls">
+                  <button class="slot-btn slot-minus">−</button>
+                  <span class="slot-count">0</span>
+                  <button class="slot-btn slot-plus">+</button>
+                </div>
+              </div>
+              <div class="cannon-slot" data-side="right">
+                <div class="cannon-slot-label">Starboard ➡</div>
+                <div class="cannon-slot-controls">
+                  <button class="slot-btn slot-minus">−</button>
+                  <span class="slot-count">0</span>
+                  <button class="slot-btn slot-plus">+</button>
+                </div>
+              </div>
+            </div>
+            <div class="cannon-builder-hint">
+              Port/Starboard cannons fire sideways — pull up alongside an enemy to broadside them.
+              Bow cannons fire straight ahead, good for chasing a ship down.
+            </div>
+          </div>
+          <button id="shipyard-close">Set Sail</button>
+        </div>
+      </div>
+
+      <button id="port-btn" class="hidden">⚓ Open Shipyard</button>
+
+      <div id="touch-controls">
+        <div id="joystick-zone">
+          <div id="joystick-base"><div id="joystick-knob"></div></div>
+        </div>
+        <button id="fire-btn">🔥 FIRE</button>
+        <button id="boost-btn">⚡ BOOST</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

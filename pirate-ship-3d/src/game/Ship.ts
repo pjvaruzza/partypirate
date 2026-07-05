@@ -1,0 +1,240 @@
+import * as THREE from 'three';
+
+export interface ShipStats {
+  sailLevel: number; // affects top speed & acceleration
+  cannonLevel: number; // affects damage & reload speed
+  hullLevel: number; // affects max health
+}
+
+export type CannonSide = 'front' | 'left' | 'right';
+
+export interface CannonLoadout {
+  front: number;
+  left: number;
+  right: number;
+}
+
+const DEFAULT_LOADOUT: CannonLoadout = { front: 0, left: 1, right: 1 };
+
+/** Local-space mount points (hull x/z) for a given side + count, shared by the
+ * ship's visual cannon meshes and the combat system's firing origins so the
+ * two stay in sync. */
+export function cannonMountOffsets(side: CannonSide, count: number, scale: number): { x: number; z: number }[] {
+  if (count <= 0) return [];
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const spread = (i: number) => (count === 1 ? 0.5 : i / (count - 1));
+
+  if (side === 'front') {
+    const half = 0.4 * scale;
+    return Array.from({ length: count }, (_, i) => ({
+      x: lerp(-half, half, spread(i)),
+      z: 1.85 * scale,
+    }));
+  }
+
+  // Flipped relative to the "true" right-hand rule: the chase camera trails
+  // behind and looks at the ship, which mirrors screen left/right relative
+  // to the hull's own local axes. This keeps Port/Starboard matching what
+  // the player actually sees on screen while sailing.
+  const xSign = side === 'left' ? 1 : -1;
+  return Array.from({ length: count }, (_, i) => ({
+    x: xSign * 0.85 * scale,
+    z: lerp(-1.3 * scale, 1.3 * scale, spread(i)),
+  }));
+}
+
+function buildHull(hullColor: number, sailColor: number, scale: number): THREE.Group {
+  const group = new THREE.Group();
+
+  const hullGeo = new THREE.BoxGeometry(1.6 * scale, 0.7 * scale, 4 * scale);
+  // taper the bow/stern by skewing a few vertices for a boat-ish silhouette
+  const pos = hullGeo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    if (z > 1.6 * scale) pos.setX(i, x * 0.25);
+    else if (z < -1.6 * scale) pos.setX(i, x * 0.55);
+  }
+  pos.needsUpdate = true;
+  hullGeo.computeVertexNormals();
+
+  const hullMat = new THREE.MeshStandardMaterial({ color: hullColor, roughness: 0.75 });
+  const hull = new THREE.Mesh(hullGeo, hullMat);
+  hull.position.y = 0.35 * scale;
+  hull.castShadow = true;
+  group.add(hull);
+
+  const deckGeo = new THREE.BoxGeometry(1.3 * scale, 0.1 * scale, 3.4 * scale);
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6437, roughness: 0.9 });
+  const deck = new THREE.Mesh(deckGeo, deckMat);
+  deck.position.y = 0.75 * scale;
+  group.add(deck);
+
+  const mastGeo = new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, 3.2 * scale, 8);
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21 });
+  const mast = new THREE.Mesh(mastGeo, mastMat);
+  mast.position.set(0, 2.1 * scale, -0.2 * scale);
+  mast.castShadow = true;
+  group.add(mast);
+
+  const sailGeo = new THREE.PlaneGeometry(1.4 * scale, 2.2 * scale, 4, 4);
+  const sailMat = new THREE.MeshStandardMaterial({
+    color: sailColor,
+    side: THREE.DoubleSide,
+    roughness: 0.85,
+  });
+  const sail = new THREE.Mesh(sailGeo, sailMat);
+  sail.position.set(0, 2.2 * scale, -0.19 * scale);
+  sail.name = 'sail';
+  group.add(sail);
+
+  const flagGeo = new THREE.ConeGeometry(0.15 * scale, 0.4 * scale, 4);
+  const flagMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  const flag = new THREE.Mesh(flagGeo, flagMat);
+  flag.rotation.z = Math.PI / 2;
+  flag.position.set(0, 3.75 * scale, -0.2 * scale);
+  group.add(flag);
+
+  return group;
+}
+
+function buildCannonBarrel(scale: number): THREE.Mesh {
+  const geo = new THREE.CylinderGeometry(0.07 * scale, 0.09 * scale, 0.55 * scale, 8);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.4, roughness: 0.6 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  return mesh;
+}
+
+function buildCannonsGroup(loadout: CannonLoadout, scale: number): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'cannons';
+  const mountY = 0.72 * scale;
+
+  (['front', 'left', 'right'] as CannonSide[]).forEach((side) => {
+    const offsets = cannonMountOffsets(side, loadout[side], scale);
+    for (const offset of offsets) {
+      const barrel = buildCannonBarrel(scale);
+      barrel.position.set(offset.x, mountY, offset.z);
+      if (side === 'front') {
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.z += 0.3 * scale;
+      } else {
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.x += (side === 'left' ? -0.25 : 0.25) * scale;
+      }
+      group.add(barrel);
+    }
+  });
+
+  return group;
+}
+
+function disposeGroup(group: THREE.Group) {
+  group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.geometry.dispose();
+      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+      else obj.material.dispose();
+    }
+  });
+}
+
+export class Ship {
+  readonly group: THREE.Group;
+  readonly scale: number;
+  private sailMesh: THREE.Mesh;
+  private cannonsGroup: THREE.Group;
+
+  position = new THREE.Vector3();
+  heading = 0; // radians, 0 = facing -Z
+  speed = 0;
+  health: number;
+  maxHealth: number;
+  alive = true;
+
+  stats: ShipStats;
+  loadout: CannonLoadout;
+  cannonCooldown = 0;
+  private bobPhase = Math.random() * Math.PI * 2;
+
+  constructor(
+    stats: ShipStats,
+    opts: { hullColor?: number; sailColor?: number; scale?: number; loadout?: CannonLoadout } = {},
+  ) {
+    this.stats = stats;
+    this.scale = opts.scale ?? 1;
+    this.loadout = opts.loadout ?? { ...DEFAULT_LOADOUT };
+    this.maxHealth = 60 + stats.hullLevel * 40;
+    this.health = this.maxHealth;
+    this.group = buildHull(opts.hullColor ?? 0x6b4a2c, opts.sailColor ?? 0xe8e0cf, this.scale);
+    this.sailMesh = this.group.getObjectByName('sail') as THREE.Mesh;
+    this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale);
+    this.group.add(this.cannonsGroup);
+  }
+
+  get topSpeed() {
+    return 6 + this.stats.sailLevel * 2.2;
+  }
+
+  get acceleration() {
+    return 3.5 + this.stats.sailLevel * 1.1;
+  }
+
+  get turnRate() {
+    return 1.5 - Math.min(this.stats.sailLevel * 0.03, 0.5);
+  }
+
+  get cannonDamage() {
+    return 12 + this.stats.cannonLevel * 6;
+  }
+
+  get cannonReload() {
+    return Math.max(0.35, 1.1 - this.stats.cannonLevel * 0.08);
+  }
+
+  setLoadout(loadout: CannonLoadout) {
+    this.loadout = { ...loadout };
+    this.group.remove(this.cannonsGroup);
+    disposeGroup(this.cannonsGroup);
+    this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale);
+    this.group.add(this.cannonsGroup);
+  }
+
+  takeDamage(amount: number) {
+    if (!this.alive) return;
+    this.health = Math.max(0, this.health - amount);
+    if (this.health <= 0) this.alive = false;
+  }
+
+  /** Steers and accelerates the ship; does not move it (caller integrates position). */
+  applyControls(turn: number, throttle: number, dt: number, boosting: boolean) {
+    this.heading += turn * this.turnRate * dt * (this.speed >= 0 ? 1 : -1);
+
+    const targetSpeed = throttle * this.topSpeed * (throttle < 0 ? 0.5 : boosting ? 1.6 : 1);
+    const accel = this.acceleration * (boosting ? 1.8 : 1);
+    if (this.speed < targetSpeed) {
+      this.speed = Math.min(targetSpeed, this.speed + accel * dt);
+    } else {
+      this.speed = Math.max(targetSpeed, this.speed - accel * dt);
+    }
+  }
+
+  integrate(dt: number) {
+    const dir = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
+    this.position.addScaledVector(dir, this.speed * dt);
+  }
+
+  syncVisual(waveHeight: number, time: number) {
+    this.group.position.set(this.position.x, waveHeight + 0.15, this.position.z);
+    this.group.rotation.y = this.heading;
+    const bob = Math.sin(time * 1.6 + this.bobPhase) * 0.05;
+    this.group.rotation.z = bob;
+    this.group.rotation.x = Math.sin(time * 1.3 + this.bobPhase) * 0.03;
+    this.sailMesh.rotation.y = Math.min(Math.abs(this.speed) / this.topSpeed, 1) * 0.15;
+  }
+
+  forwardDirection(): THREE.Vector3 {
+    return new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
+  }
+}
