@@ -62,6 +62,7 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
   const hull = new THREE.Mesh(hullGeo, hullMat);
   hull.position.y = 0.35 * scale;
   hull.castShadow = true;
+  hull.name = 'hull';
   group.add(hull);
 
   const deckGeo = new THREE.BoxGeometry(1.3 * scale, 0.1 * scale, 3.4 * scale);
@@ -140,10 +141,14 @@ function disposeGroup(group: THREE.Group) {
   });
 }
 
+const SINK_DURATION = 2.2;
+
 export class Ship {
   readonly group: THREE.Group;
   readonly scale: number;
   private sailMesh: THREE.Mesh;
+  private hullMesh: THREE.Mesh;
+  private hullMat: THREE.MeshStandardMaterial;
   private cannonsGroup: THREE.Group;
 
   position = new THREE.Vector3();
@@ -157,6 +162,10 @@ export class Ship {
   loadout: CannonLoadout;
   cannonCooldown = 0;
   private bobPhase = Math.random() * Math.PI * 2;
+  private hitFlash = 0;
+  private sinking = false;
+  private sinkTimer = 0;
+  private sinkListDir = 1;
 
   constructor(
     stats: ShipStats,
@@ -169,6 +178,8 @@ export class Ship {
     this.health = this.maxHealth;
     this.group = buildHull(opts.hullColor ?? 0x6b4a2c, opts.sailColor ?? 0xe8e0cf, this.scale);
     this.sailMesh = this.group.getObjectByName('sail') as THREE.Mesh;
+    this.hullMesh = this.group.getObjectByName('hull') as THREE.Mesh;
+    this.hullMat = this.hullMesh.material as THREE.MeshStandardMaterial;
     this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale);
     this.group.add(this.cannonsGroup);
   }
@@ -204,7 +215,41 @@ export class Ship {
   takeDamage(amount: number) {
     if (!this.alive) return;
     this.health = Math.max(0, this.health - amount);
-    if (this.health <= 0) this.alive = false;
+    if (this.health <= 0) {
+      this.alive = false;
+      this.startSinking();
+    }
+  }
+
+  flashHit() {
+    this.hitFlash = 1;
+  }
+
+  updateHitFlash(dt: number) {
+    if (this.hitFlash <= 0) return;
+    this.hitFlash = Math.max(0, this.hitFlash - dt * 3);
+    this.hullMat.emissive.setRGB(this.hitFlash, this.hitFlash * 0.85, this.hitFlash * 0.75);
+  }
+
+  private startSinking() {
+    if (this.sinking) return;
+    this.sinking = true;
+    this.sinkTimer = 0;
+    this.sinkListDir = Math.random() < 0.5 ? -1 : 1;
+  }
+
+  resetSink() {
+    this.sinking = false;
+    this.sinkTimer = 0;
+  }
+
+  updateSink(dt: number) {
+    if (this.sinking) this.sinkTimer = Math.min(SINK_DURATION, this.sinkTimer + dt);
+  }
+
+  /** True once the sinking animation has fully played out. */
+  get sunk(): boolean {
+    return this.sinking && this.sinkTimer >= SINK_DURATION;
   }
 
   /** Steers and accelerates the ship; does not move it (caller integrates position). */
@@ -226,6 +271,15 @@ export class Ship {
   }
 
   syncVisual(waveHeight: number, time: number) {
+    if (this.sinking) {
+      const t = this.sinkTimer / SINK_DURATION;
+      const eased = t * t;
+      this.group.position.set(this.position.x, waveHeight + 0.15 - eased * 2.5, this.position.z);
+      this.group.rotation.y = this.heading;
+      this.group.rotation.z = this.sinkListDir * eased * 0.9;
+      this.group.rotation.x = eased * 0.4;
+      return;
+    }
     this.group.position.set(this.position.x, waveHeight + 0.15, this.position.z);
     this.group.rotation.y = this.heading;
     const bob = Math.sin(time * 1.6 + this.bobPhase) * 0.05;

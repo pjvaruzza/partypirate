@@ -5,20 +5,24 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
 
 ## Tier 1 — Make combat feel great (do these first)
 
-- **Enemy broadside AI (S/M):** enemies currently just point at the player and
-  fire straight ahead. Give them the same loadout system — most enemy ships
-  should try to turn broadside-on before firing, so "pull alongside" tactics
-  matter for both sides of a fight, not just the player.
-- **Juice pass (S):** cannon muzzle flash, splash particles on cannonball
-  impact/miss, explosion + debris when a ship sinks, screen shake on taking a
-  hit, hit-flash/tint on damaged ships. This is probably the single highest
-  fun-per-hour investment — the mechanics already work, they just don't feel
-  impactful yet.
-- **Sound (S/M):** cannon fire, splashes, wood creaking, ambient wind/waves,
-  a sting on sinking a ship, simple looping music. Even placeholder SFX would
-  transform the feel.
-- **Sinking animation (S):** ships should visibly list and sink over ~2s with
-  particles, not just vanish — same for the player on death.
+- [x] **Enemy broadside AI (S/M):** enemies now use the same fire-all-mounted-
+  cannons loadout system as the player and steer to hold a broadside-on
+  orbit at range during the `attack` state (picking whichever perpendicular
+  heading is closer to avoid flip-flopping), only firing once actually abeam
+  of the target. `chase`/`patrol` behavior is unchanged.
+- [x] **Juice pass (S):** cannon muzzle flash, splash particles where
+  cannonballs hit water, wood-splinter bursts on ship impacts, an
+  explosion + debris burst when a ship sinks, screen shake on the player
+  taking a hit, and a red/white hit-flash tint on any ship taking damage.
+  See `src/game/Effects.ts`.
+- [x] **Sound (S/M):** cannon fire, splashes, hit impacts, a descending
+  "sink" sting, and a looping wind/wave ambient bed — all synthesized live
+  via Web Audio (filtered noise + oscillators), no audio assets needed. See
+  `src/game/Audio.ts`. Still open: wood-creaking detail layer, real music.
+- [x] **Sinking animation (S):** ships now list to one side and settle
+  ~2.5 units into the water over ~2.2s (with the sink explosion/sound
+  firing at the moment of death) instead of vanishing instantly, for both
+  enemies and the player.
 
 ## Tier 2 — Combat depth & variety
 
@@ -76,7 +80,6 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
 
 ---
 
-**Suggested next session's focus:** Tier 1 in full (broadside AI + juice +
-sound + sinking animation). That's the highest-leverage set — it makes the
-existing mechanics feel as good as they already function, before adding more
-systems on top.
+**Suggested next session's focus:** Tier 1 is done — move on to Tier 2
+(combat depth & variety), starting with more powerup/ammo types and ramming,
+since those build directly on the loadout/broadside systems that now exist.

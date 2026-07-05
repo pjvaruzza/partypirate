@@ -6,10 +6,13 @@ import { World } from './game/World';
 import { InputManager } from './game/Input';
 import { CombatSystem, type EnemyShip } from './game/Combat';
 import { Economy } from './game/Economy';
+import { Effects } from './game/Effects';
+import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const portBtn = document.getElementById('port-btn') as HTMLButtonElement;
+const muteBtn = document.getElementById('mute-btn') as HTMLButtonElement;
 
 const WORLD_RADIUS = 900;
 const MAX_ENEMIES = 6;
@@ -56,6 +59,24 @@ scene.add(ocean.mesh);
 
 const world = new World(scene, 12, WORLD_RADIUS);
 
+// --- effects / sound ----------------------------------------------------
+const effects = new Effects(scene);
+const sound = new SoundManager();
+function unlockAudio() {
+  sound.resume();
+  window.removeEventListener('pointerdown', unlockAudio);
+  window.removeEventListener('keydown', unlockAudio);
+}
+window.addEventListener('pointerdown', unlockAudio);
+window.addEventListener('keydown', unlockAudio);
+
+let muted = false;
+muteBtn?.addEventListener('click', () => {
+  muted = !muted;
+  sound.setMuted(muted);
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+});
+
 // --- economy / player ship -----------------------------------------------
 const economy = new Economy();
 const hud = new HUD(economy);
@@ -76,17 +97,23 @@ let boostTimer = 0;
 let boostRechargeTimer = 0;
 
 // --- combat -----------------------------------------------------------------
-const combat = new CombatSystem(scene, {
-  onPlayerHit: () => {
-    hud.setHealth(player.health, player.maxHealth);
-    flashDamage();
+const combat = new CombatSystem(
+  scene,
+  {
+    onPlayerHit: () => {
+      hud.setHealth(player.health, player.maxHealth);
+      flashDamage();
+      triggerShake(0.35, 0.4);
+    },
+    onEnemySunk: (enemy: EnemyShip) => {
+      economy.addGold(enemy.goldReward);
+      hud.showMessage(`Enemy sunk! +${enemy.goldReward} gold`);
+    },
+    onGoldEarned: () => {},
   },
-  onEnemySunk: (enemy: EnemyShip) => {
-    economy.addGold(enemy.goldReward);
-    hud.showMessage(`Enemy sunk! +${enemy.goldReward} gold`);
-  },
-  onGoldEarned: () => {},
-});
+  effects,
+  sound,
+);
 
 function spawnEnemyWave() {
   if (combat.enemies.length >= MAX_ENEMIES) return;
@@ -114,11 +141,22 @@ function flashDamage() {
   damageFlash = 1;
 }
 
+// --- screen shake ---------------------------------------------------------
+let shakeTimeLeft = 0;
+let shakeDuration = 0;
+let shakeMagnitude = 0;
+function triggerShake(duration: number, magnitude: number) {
+  shakeTimeLeft = duration;
+  shakeDuration = duration;
+  shakeMagnitude = magnitude;
+}
+
 // --- respawn ---------------------------------------------------------------
 let isSunk = false;
 function respawn() {
   player.health = player.maxHealth;
   player.alive = true;
+  player.resetSink();
   player.position.set(0, 0, 45);
   player.heading = Math.PI;
   player.speed = 0;
@@ -158,6 +196,7 @@ function animate() {
   elapsed += dt;
   ocean.update(elapsed);
   world.update(elapsed, (x, z) => ocean.getHeightAt(x, z, elapsed));
+  effects.update(dt);
 
   input.update();
   const shipyardOpen = hud.isShipyardOpen();
@@ -219,6 +258,8 @@ function animate() {
     portBtn.classList.add('hidden');
   }
 
+  player.updateSink(dt);
+  player.updateHitFlash(dt);
   const waveH = ocean.getHeightAt(player.position.x, player.position.z, elapsed);
   player.syncVisual(waveH, elapsed);
 
@@ -231,6 +272,13 @@ function animate() {
   camera.position.lerp(desiredCamPos, 1 - Math.pow(0.001, dt));
   cameraTarget.lerp(player.group.position, 1 - Math.pow(0.0005, dt));
   camera.lookAt(cameraTarget.x, cameraTarget.y + 1.5, cameraTarget.z);
+
+  if (shakeTimeLeft > 0) {
+    shakeTimeLeft = Math.max(0, shakeTimeLeft - dt);
+    const s = shakeMagnitude * (shakeTimeLeft / shakeDuration);
+    camera.position.x += (Math.random() - 0.5) * s;
+    camera.position.y += (Math.random() - 0.5) * s;
+  }
 
   if (damageFlash > 0) damageFlash = Math.max(0, damageFlash - dt * 2);
 

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { Ship, cannonMountOffsets, type ShipStats, type CannonSide } from './Ship';
+import { Effects } from './Effects';
+import { SoundManager } from './Audio';
 
 const GRAVITY = 9.8;
 
@@ -10,6 +12,8 @@ export class Cannonball {
   damage: number;
   owner: 'player' | 'enemy';
   alive = true;
+  /** Set when the ball expired by hitting the waterline (vs. hitting a ship). */
+  hitWater = false;
   private age = 0;
 
   constructor(
@@ -35,7 +39,10 @@ export class Cannonball {
     this.position.addScaledVector(this.velocity, dt);
     this.mesh.position.copy(this.position);
     this.age += dt;
-    if (this.position.y <= waterHeight || this.age > 6) {
+    if (this.position.y <= waterHeight) {
+      this.alive = false;
+      this.hitWater = true;
+    } else if (this.age > 6) {
       this.alive = false;
     }
   }
@@ -44,6 +51,16 @@ export class Cannonball {
     scene.remove(this.mesh);
   }
 }
+
+function angleDiff(a: number, b: number): number {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+const IDEAL_BROADSIDE_RANGE = 28;
+const BROADSIDE_FIRE_WINDOW = (35 * Math.PI) / 180; // fire once within 35° of pure broadside-on
 
 export class EnemyShip {
   ship: Ship;
@@ -62,9 +79,10 @@ export class EnemyShip {
     this.goldReward = goldReward;
   }
 
-  update(dt: number, playerPos: THREE.Vector3, fireCallback: (heading: number, pos: THREE.Vector3) => void) {
+  update(dt: number, playerPos: THREE.Vector3, fireCallback: (ship: Ship) => void) {
     if (!this.ship.alive) return;
-    const distToPlayer = this.ship.position.distanceTo(playerPos);
+    const toPlayer = new THREE.Vector3().subVectors(playerPos, this.ship.position);
+    const distToPlayer = toPlayer.length();
     const detectRange = 90;
     const attackRange = 45;
 
@@ -74,34 +92,50 @@ export class EnemyShip {
       this.state = 'patrol';
     }
 
-    let targetPos = this.patrolTarget;
-    let throttle = 0.5;
-    if (this.state === 'chase') {
-      targetPos = playerPos;
+    let desiredHeading: number;
+    let throttle: number;
+
+    if (this.state === 'attack') {
+      // Pull broadside-on rather than pointing the bow at the target: aim for
+      // whichever perpendicular heading is closer to the current one (so the
+      // ship settles into an orbit instead of flip-flopping sides), and back
+      // off or close in to hold a comfortable firing range.
+      const bearingToTarget = Math.atan2(toPlayer.x, toPlayer.z);
+      const perpA = bearingToTarget + Math.PI / 2;
+      const perpB = bearingToTarget - Math.PI / 2;
+      const dA = angleDiff(perpA, this.ship.heading);
+      const dB = angleDiff(perpB, this.ship.heading);
+      desiredHeading = Math.abs(dA) < Math.abs(dB) ? perpA : perpB;
+      if (distToPlayer > IDEAL_BROADSIDE_RANGE + 10) throttle = 0.85;
+      else if (distToPlayer < IDEAL_BROADSIDE_RANGE - 10) throttle = 0.3;
+      else throttle = 0.55;
+    } else if (this.state === 'chase') {
+      desiredHeading = Math.atan2(toPlayer.x, toPlayer.z);
       throttle = 0.9;
-    } else if (this.state === 'attack') {
-      targetPos = playerPos;
-      throttle = 0.6;
-    } else if (this.ship.position.distanceTo(this.patrolTarget) < 10) {
-      this.patrolTarget = this.ship.position.clone().add(
-        new THREE.Vector3((Math.random() - 0.5) * 150, 0, (Math.random() - 0.5) * 150),
-      );
+    } else {
+      if (this.ship.position.distanceTo(this.patrolTarget) < 10) {
+        this.patrolTarget = this.ship.position.clone().add(
+          new THREE.Vector3((Math.random() - 0.5) * 150, 0, (Math.random() - 0.5) * 150),
+        );
+      }
+      const toPatrol = new THREE.Vector3().subVectors(this.patrolTarget, this.ship.position);
+      desiredHeading = Math.atan2(toPatrol.x, toPatrol.z);
+      throttle = 0.5;
     }
 
-    const toTarget = new THREE.Vector3().subVectors(targetPos, this.ship.position);
-    const desiredHeading = Math.atan2(toTarget.x, toTarget.z);
-    let diff = desiredHeading - this.ship.heading;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    const turn = Math.max(-1, Math.min(1, diff * 2));
-
+    const turn = Math.max(-1, Math.min(1, angleDiff(desiredHeading, this.ship.heading) * 2));
     this.ship.applyControls(turn, throttle, dt, false);
     this.ship.integrate(dt);
 
     this.ship.cannonCooldown -= dt;
     if (this.state === 'attack' && this.ship.cannonCooldown <= 0) {
-      this.ship.cannonCooldown = this.ship.cannonReload * 1.5;
-      fireCallback(this.ship.heading, this.ship.position);
+      const bearingToTarget = Math.atan2(toPlayer.x, toPlayer.z);
+      const relBearing = Math.abs(angleDiff(bearingToTarget, this.ship.heading));
+      const isBroadsideOn = Math.abs(relBearing - Math.PI / 2) < BROADSIDE_FIRE_WINDOW;
+      if (isBroadsideOn) {
+        this.ship.cannonCooldown = this.ship.cannonReload * 1.5;
+        fireCallback(this.ship);
+      }
     }
   }
 }
@@ -118,10 +152,14 @@ export class CombatSystem {
 
   private scene: THREE.Scene;
   private callbacks: CombatCallbacks;
+  private effects: Effects;
+  private sound: SoundManager;
 
-  constructor(scene: THREE.Scene, callbacks: CombatCallbacks) {
+  constructor(scene: THREE.Scene, callbacks: CombatCallbacks, effects: Effects, sound: SoundManager) {
     this.scene = scene;
     this.callbacks = callbacks;
+    this.effects = effects;
+    this.sound = sound;
   }
 
   spawnEnemy(stats: ShipStats, pos: THREE.Vector3, goldReward: number) {
@@ -131,8 +169,10 @@ export class CombatSystem {
     return enemy;
   }
 
-  fireFromShip(ship: Ship, owner: 'player' | 'enemy') {
-    if (ship.cannonCooldown > 0 && owner === 'player') return;
+  /** Fires every mounted cannon on `ship`. Returns false if a player shot was
+   * blocked by reload cooldown (enemies manage their own cooldown externally). */
+  fireFromShip(ship: Ship, owner: 'player' | 'enemy'): boolean {
+    if (ship.cannonCooldown > 0 && owner === 'player') return false;
     if (owner === 'player') ship.cannonCooldown = ship.cannonReload;
 
     const forward = ship.forwardDirection();
@@ -146,6 +186,7 @@ export class CombatSystem {
       right: right.clone().multiplyScalar(-1),
     };
 
+    let fired = false;
     (['front', 'left', 'right'] as CannonSide[]).forEach((side) => {
       const count = ship.loadout[side];
       if (count <= 0) return;
@@ -155,17 +196,14 @@ export class CombatSystem {
         const startPos = origin.clone().add(worldOffset);
         const vel = fireDir[side].clone().multiplyScalar(speed).add(new THREE.Vector3(0, 6, 0));
         this.cannonballs.push(new Cannonball(startPos, vel, ship.cannonDamage, owner, this.scene));
+        this.effects.muzzleFlash(startPos, fireDir[side]);
+        fired = true;
       }
     });
-  }
 
-  private fireEnemyCannon = (heading: number, pos: THREE.Vector3) => {
-    const dir = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
-    const speed = 22;
-    const origin = pos.clone().add(new THREE.Vector3(0, 1.2, 0));
-    const vel = dir.multiplyScalar(speed).add(new THREE.Vector3(0, 5.5, 0));
-    this.cannonballs.push(new Cannonball(origin, vel, 8, 'enemy', this.scene));
-  };
+    if (fired) this.sound.cannonFire();
+    return fired;
+  }
 
   update(
     dt: number,
@@ -173,8 +211,11 @@ export class CombatSystem {
     getWaveHeight: (x: number, z: number) => number,
   ) {
     for (const enemy of this.enemies) {
-      if (!enemy.ship.alive) continue;
-      enemy.update(dt, playerShip.position, this.fireEnemyCannon);
+      if (enemy.ship.alive) {
+        enemy.update(dt, playerShip.position, (ship) => this.fireFromShip(ship, 'enemy'));
+      }
+      enemy.ship.updateSink(dt);
+      enemy.ship.updateHitFlash(dt);
       const h = getWaveHeight(enemy.ship.position.x, enemy.ship.position.z);
       enemy.ship.syncVisual(h, performance.now() / 1000);
     }
@@ -182,6 +223,7 @@ export class CombatSystem {
     for (const ball of this.cannonballs) {
       const h = getWaveHeight(ball.position.x, ball.position.z);
       ball.update(dt, h);
+      if (!ball.alive && ball.hitWater) this.effects.splash(ball.position);
     }
 
     // collisions
@@ -192,9 +234,14 @@ export class CombatSystem {
           if (!enemy.ship.alive) continue;
           if (ball.position.distanceTo(enemy.ship.position) < 3) {
             enemy.ship.takeDamage(ball.damage);
+            enemy.ship.flashHit();
+            this.effects.impactSplinters(ball.position);
+            this.sound.hitImpact();
             ball.alive = false;
             if (!enemy.ship.alive && !enemy.rewarded) {
               enemy.rewarded = true;
+              this.effects.sinkExplosion(enemy.ship.position);
+              this.sound.sink();
               this.callbacks.onEnemySunk(enemy);
             }
             break;
@@ -202,8 +249,16 @@ export class CombatSystem {
         }
       } else if (ball.owner === 'enemy') {
         if (ball.position.distanceTo(playerShip.position) < 3) {
+          const wasAlive = playerShip.alive;
           playerShip.takeDamage(ball.damage);
+          playerShip.flashHit();
+          this.effects.impactSplinters(ball.position);
+          this.sound.hitImpact();
           this.callbacks.onPlayerHit(ball.damage);
+          if (wasAlive && !playerShip.alive) {
+            this.effects.sinkExplosion(playerShip.position);
+            this.sound.sink();
+          }
           ball.alive = false;
         }
       }
@@ -215,10 +270,10 @@ export class CombatSystem {
     this.cannonballs = this.cannonballs.filter((b) => b.alive);
 
     for (const enemy of this.enemies) {
-      if (!enemy.ship.alive && enemy.ship.group.parent) {
+      if (enemy.ship.sunk && enemy.ship.group.parent) {
         this.scene.remove(enemy.ship.group);
       }
     }
-    this.enemies = this.enemies.filter((e) => e.ship.alive);
+    this.enemies = this.enemies.filter((e) => !e.ship.sunk);
   }
 }
