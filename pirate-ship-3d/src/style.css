@@ -110,7 +110,8 @@ body {
   opacity: 1;
 }
 
-#shipyard {
+#shipyard,
+#join-screen {
   position: absolute;
   inset: 0;
   background: rgba(4, 10, 18, 0.72);
@@ -118,10 +119,69 @@ body {
   align-items: center;
   justify-content: center;
   pointer-events: auto;
+  z-index: 10;
 }
 
-#shipyard.hidden {
+#shipyard.hidden,
+#join-screen.hidden {
   display: none;
+}
+
+#join-panel {
+  background: #16283b;
+  border: 2px solid #3a5a78;
+  border-radius: 14px;
+  padding: 28px 32px;
+  width: min(90vw, 360px);
+  color: #fff;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+#join-panel h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  color: #ffd27a;
+}
+
+#join-status {
+  margin: 0 0 18px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+#join-name {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 16px;
+  margin-bottom: 14px;
+  box-sizing: border-box;
+}
+
+#join-name::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+#join-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background: #3ea36b;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#join-btn:disabled {
+  background: #556;
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 #shipyard-panel {

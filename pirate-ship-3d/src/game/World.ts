@@ -1,18 +1,12 @@
 import * as THREE from 'three';
 import { specklTexture, woodGrainTexture } from './Textures';
+import type { IslandInfo } from '../shared/protocol';
 
 export interface Island {
   position: THREE.Vector3;
   radius: number;
   isHomePort: boolean;
   mesh: THREE.Group;
-}
-
-export interface GoldCrate {
-  position: THREE.Vector3;
-  mesh: THREE.Mesh;
-  collected: boolean;
-  value: number;
 }
 
 /** Sand near the waterline, grading through rock, up to grass at the summit. */
@@ -154,7 +148,9 @@ function buildIsland(radius: number, isHomePort: boolean): THREE.Group {
   return group;
 }
 
-function buildCrate(): THREE.Mesh {
+/** Gold crates are server-owned state now (position/collection is
+ * authoritative); this just builds the pickup mesh for main.ts to place. */
+export function buildCrateMesh(): THREE.Mesh {
   const geo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
   const mat = new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.5, metalness: 0.3 });
   const mesh = new THREE.Mesh(geo, mat);
@@ -162,81 +158,24 @@ function buildCrate(): THREE.Mesh {
   return mesh;
 }
 
+/** Renders the island layout the server assigned for this session — every
+ * client builds identical meshes from the same island list so everyone sees
+ * the same world. */
 export class World {
   islands: Island[] = [];
-  crates: GoldCrate[] = [];
   homePort: Island;
 
-  private scene: THREE.Scene;
-
-  constructor(scene: THREE.Scene, islandCount = 10, worldRadius = 900) {
-    this.scene = scene;
-    const homeMesh = buildIsland(22, true);
-    this.homePort = {
-      position: new THREE.Vector3(0, 0, 0),
-      radius: 22,
-      isHomePort: true,
-      mesh: homeMesh,
-    };
-    homeMesh.position.copy(this.homePort.position);
-    scene.add(homeMesh);
-    this.islands.push(this.homePort);
-
-    for (let i = 0; i < islandCount; i++) {
-      const angle = (i / islandCount) * Math.PI * 2 + Math.random() * 0.5;
-      const dist = 150 + Math.random() * (worldRadius - 150);
-      const pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
-      const radius = 12 + Math.random() * 20;
-      const mesh = buildIsland(radius, false);
-      mesh.position.copy(pos);
+  constructor(scene: THREE.Scene, islandInfos: IslandInfo[]) {
+    for (const info of islandInfos) {
+      const mesh = buildIsland(info.radius, info.isHomePort);
+      const position = new THREE.Vector3(info.x, 0, info.z);
+      mesh.position.copy(position);
       scene.add(mesh);
-      this.islands.push({ position: pos, radius, isHomePort: false, mesh });
+      this.islands.push({ position, radius: info.radius, isHomePort: info.isHomePort, mesh });
     }
-
-    this.spawnCrates(18, worldRadius);
-  }
-
-  private spawnCrates(count: number, worldRadius: number) {
-    for (let i = 0; i < count; i++) this.spawnOneCrate(worldRadius);
-  }
-
-  spawnOneCrate(worldRadius = 900) {
-    let pos: THREE.Vector3;
-    let attempts = 0;
-    do {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 40 + Math.random() * (worldRadius - 40);
-      pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
-      attempts++;
-    } while (this.islands.some((isl) => isl.position.distanceTo(pos) < isl.radius + 8) && attempts < 20);
-
-    const mesh = buildCrate();
-    mesh.position.copy(pos);
-    this.scene.add(mesh);
-    this.crates.push({ position: pos, mesh, collected: false, value: 10 + Math.floor(Math.random() * 20) });
-  }
-
-  update(time: number, getWaveHeight: (x: number, z: number) => number) {
-    for (const crate of this.crates) {
-      if (crate.collected) continue;
-      const h = getWaveHeight(crate.position.x, crate.position.z);
-      crate.mesh.position.y = h + 0.3;
-      crate.mesh.rotation.y = time * 0.6;
-    }
-  }
-
-  collectCrate(crate: GoldCrate) {
-    crate.collected = true;
-    this.scene.remove(crate.mesh);
-  }
-
-  distanceToNearestLandCollision(pos: THREE.Vector3, margin: number): number {
-    let closest = Infinity;
-    for (const isl of this.islands) {
-      const d = isl.position.distanceTo(pos) - isl.radius - margin;
-      if (d < closest) closest = d;
-    }
-    return closest;
+    const home = this.islands.find((isl) => isl.isHomePort);
+    if (!home) throw new Error('World: server sent no home port island');
+    this.homePort = home;
   }
 
   isNearHomePort(pos: THREE.Vector3, extra = 15): boolean {

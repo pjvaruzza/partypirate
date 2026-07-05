@@ -1,9 +1,6 @@
-export interface InputState {
-  turn: number; // -1 (left) .. 1 (right)
-  throttle: number; // -1 (reverse) .. 1 (full forward)
-  fire: boolean;
-  boost: boolean;
-}
+import type { InputState } from '../shared/protocol';
+
+export type { InputState };
 
 export class InputManager {
   readonly state: InputState = { turn: 0, throttle: 0, fire: false, boost: false };

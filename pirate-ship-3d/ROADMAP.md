@@ -65,21 +65,46 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   shading (foam trails behind the ship, reflections).
 - **Performance pass for low-end mobile (S/M):** LOD for distant islands/
   ocean segments, cheaper shadows, frame budget testing on a throttled device.
-- **Save to an account instead of localStorage (M):** needed before this can
-  be a "real" cross-device game rather than a single-browser prototype.
+- [x] **Save to an account instead of localStorage (M):** superseded by the
+  multiplayer server below — progress now lives in
+  `server/data/players.json`, keyed by captain name, instead of the
+  browser's localStorage.
 
 ## Tier 5 — Stretch / long-term
 
 - **Async multiplayer leaderboards (M):** global "richest pirate" / "most
   ships sunk" boards — cheap social hook without needing live multiplayer.
-- **Live co-op or PvP (L):** actual multiplayer is a big lift (netcode,
-  server, matchmaking) — worth considering only once the single-player loop
-  is proven fun.
+- [x] **Live co-op multiplayer (L):** done for a LAN-hosted friend group — see
+  "Multiplayer follow-ups" below for what's still missing before this is a
+  polished multiplayer game rather than a working first cut.
 - **Native app packaging (M):** wrap as an installable PWA (manifest +
   service worker) for add-to-homescreen, or Capacitor-wrap for app stores.
 
+## Multiplayer follow-ups (from the LAN co-op build)
+
+The server is authoritative (`server/`) and clients are thin renderers of
+its state (see `README.md` for how to run it). What's deliberately not in
+this first cut:
+
+- **PvP (M):** currently player cannonballs only damage bots, never other
+  players. Would need a toggle/flag (or a designated duel area) to opt in,
+  since griefing would otherwise ruin the co-op loop.
+- **Internet hosting (S/M):** works today over a LAN only (client derives the
+  WebSocket URL from `window.location.hostname`). Hosting on a public VM
+  needs a real domain/TLS (`wss://`) and probably a reverse proxy in front of
+  the raw `ws` server.
+- **Rooms/matchmaking (M):** one fixed world today — fine for a few friends,
+  but there's no way to run multiple simultaneous games from one server
+  process.
+- **Reconnect handling (S):** dropping and rejoining currently just spawns a
+  fresh ship at port (progress is safe, but you lose your spot mid-fight);
+  a short grace period to reclaim the same in-progress ship would feel better.
+- **Chat/pings (S):** no in-game communication yet beyond seeing each other's
+  ships — even a simple text chat or map-ping would help coordination.
+
 ---
 
-**Suggested next session's focus:** Tier 1 is done — move on to Tier 2
-(combat depth & variety), starting with more powerup/ammo types and ramming,
-since those build directly on the loadout/broadside systems that now exist.
+**Suggested next session's focus:** the multiplayer core (server-authoritative
+movement/combat/bots/persistence) is working for a LAN friend group. PvP and
+better reconnect handling are the highest-leverage next steps to make it feel
+like a finished multiplayer game rather than a working prototype.

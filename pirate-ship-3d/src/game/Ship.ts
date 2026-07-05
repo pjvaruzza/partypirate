@@ -234,7 +234,6 @@ export class Ship {
 
   stats: ShipStats;
   loadout: CannonLoadout;
-  cannonCooldown = 0;
   private bobPhase = Math.random() * Math.PI * 2;
   private hitFlash = 0;
   private sinking = false;
@@ -262,37 +261,12 @@ export class Ship {
     return 6 + this.stats.sailLevel * 2.2;
   }
 
-  get acceleration() {
-    return 3.5 + this.stats.sailLevel * 1.1;
-  }
-
-  get turnRate() {
-    return 1.5 - Math.min(this.stats.sailLevel * 0.03, 0.5);
-  }
-
-  get cannonDamage() {
-    return 12 + this.stats.cannonLevel * 6;
-  }
-
-  get cannonReload() {
-    return Math.max(0.35, 1.1 - this.stats.cannonLevel * 0.08);
-  }
-
   setLoadout(loadout: CannonLoadout) {
     this.loadout = { ...loadout };
     this.group.remove(this.cannonsGroup);
     disposeGroup(this.cannonsGroup);
     this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale);
     this.group.add(this.cannonsGroup);
-  }
-
-  takeDamage(amount: number) {
-    if (!this.alive) return;
-    this.health = Math.max(0, this.health - amount);
-    if (this.health <= 0) {
-      this.alive = false;
-      this.startSinking();
-    }
   }
 
   flashHit() {
@@ -305,13 +279,15 @@ export class Ship {
     this.hullMat.emissive.setRGB(this.hitFlash, this.hitFlash * 0.85, this.hitFlash * 0.75);
   }
 
-  private startSinking() {
+  /** Starts the sink animation; safe to call every frame while dead. */
+  beginSinking() {
     if (this.sinking) return;
     this.sinking = true;
     this.sinkTimer = 0;
     this.sinkListDir = Math.random() < 0.5 ? -1 : 1;
   }
 
+  /** Cancels the sink animation (e.g. after a respawn); safe to call every frame while alive. */
   resetSink() {
     this.sinking = false;
     this.sinkTimer = 0;
@@ -319,29 +295,6 @@ export class Ship {
 
   updateSink(dt: number) {
     if (this.sinking) this.sinkTimer = Math.min(SINK_DURATION, this.sinkTimer + dt);
-  }
-
-  /** True once the sinking animation has fully played out. */
-  get sunk(): boolean {
-    return this.sinking && this.sinkTimer >= SINK_DURATION;
-  }
-
-  /** Steers and accelerates the ship; does not move it (caller integrates position). */
-  applyControls(turn: number, throttle: number, dt: number, boosting: boolean) {
-    this.heading += turn * this.turnRate * dt * (this.speed >= 0 ? 1 : -1);
-
-    const targetSpeed = throttle * this.topSpeed * (throttle < 0 ? 0.5 : boosting ? 1.6 : 1);
-    const accel = this.acceleration * (boosting ? 1.8 : 1);
-    if (this.speed < targetSpeed) {
-      this.speed = Math.min(targetSpeed, this.speed + accel * dt);
-    } else {
-      this.speed = Math.max(targetSpeed, this.speed - accel * dt);
-    }
-  }
-
-  integrate(dt: number) {
-    const dir = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
-    this.position.addScaledVector(dir, this.speed * dt);
   }
 
   syncVisual(waveHeight: number, time: number) {

@@ -1,23 +1,24 @@
 import './style.css';
 import * as THREE from 'three';
 import { Ocean } from './game/Ocean';
-import { Ship } from './game/Ship';
-import { World } from './game/World';
+import { Ship, cannonMountOffsets } from './game/Ship';
+import { World, buildCrateMesh } from './game/World';
 import { InputManager } from './game/Input';
-import { CombatSystem, type EnemyShip } from './game/Combat';
-import { Economy } from './game/Economy';
 import { Effects } from './game/Effects';
 import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
+import { Network } from './net/Network';
+import type { CrateInfo, GameEvent, ShipSnapshot } from './shared/protocol';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const portBtn = document.getElementById('port-btn') as HTMLButtonElement;
 const muteBtn = document.getElementById('mute-btn') as HTMLButtonElement;
+const joinScreen = document.getElementById('join-screen') as HTMLDivElement;
+const joinName = document.getElementById('join-name') as HTMLInputElement;
+const joinBtn = document.getElementById('join-btn') as HTMLButtonElement;
+const joinStatus = document.getElementById('join-status') as HTMLParagraphElement;
 
 const WORLD_RADIUS = 900;
-const MAX_ENEMIES = 6;
-const BOOST_DURATION = 4;
-const BOOST_RECHARGE_TIME = 12;
 
 function createSkyTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -73,11 +74,11 @@ scene.add(sun);
 scene.add(new THREE.AmbientLight(0xbcd9ff, 0.7));
 scene.add(new THREE.HemisphereLight(0xdfefff, 0x1c3d2a, 0.5));
 
-// --- world ------------------------------------------------------------------
+// --- ocean ------------------------------------------------------------------
 const ocean = new Ocean(WORLD_RADIUS * 2.4);
 scene.add(ocean.mesh);
 
-const world = new World(scene, 12, WORLD_RADIUS);
+let world: World | null = null;
 
 // --- effects / sound ----------------------------------------------------
 const effects = new Effects(scene);
@@ -97,56 +98,89 @@ muteBtn?.addEventListener('click', () => {
   muteBtn.textContent = muted ? '🔇' : '🔊';
 });
 
-// --- economy / player ship -----------------------------------------------
-const economy = new Economy();
-const hud = new HUD(economy);
+// --- HUD / network ----------------------------------------------------------
+const hud = new HUD();
+const network = new Network();
 
-const player = new Ship(economy.shipStats(), {
-  hullColor: 0x6b4a2c,
-  sailColor: 0xf2ead6,
-  scale: 1,
-  loadout: economy.loadout(),
-});
-player.position.set(0, 0, 45);
-player.heading = Math.PI;
-scene.add(player.group);
+const renderedShips = new Map<string, Ship>();
+const renderedCrates = new Map<string, THREE.Mesh>();
 
-let boostCharge = economy.powderKegCharges();
-let boosting = false;
-let boostTimer = 0;
-let boostRechargeTimer = 0;
-
-// --- combat -----------------------------------------------------------------
-const combat = new CombatSystem(
-  scene,
-  {
-    onPlayerHit: () => {
-      hud.setHealth(player.health, player.maxHealth);
-      flashDamage();
-      triggerShake(0.35, 0.4);
-    },
-    onEnemySunk: (enemy: EnemyShip) => {
-      economy.addGold(enemy.goldReward);
-      hud.showMessage(`Enemy sunk! +${enemy.goldReward} gold`);
-    },
-    onGoldEarned: () => {},
-  },
-  effects,
-  sound,
-);
-
-function spawnEnemyWave() {
-  if (combat.enemies.length >= MAX_ENEMIES) return;
-  const angle = Math.random() * Math.PI * 2;
-  const dist = 120 + Math.random() * (WORLD_RADIUS - 150);
-  const pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
-  const tier = Math.min(4, Math.floor(dist / 220));
-  const stats = { sailLevel: tier, cannonLevel: tier, hullLevel: tier };
-  const reward = 25 + tier * 20;
-  combat.spawnEnemy(stats, pos, reward);
+function shipVisualOptions(isYou: boolean, isBot: boolean) {
+  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xf2ead6, scale: 1 };
+  if (isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
+  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale: 1 };
 }
-for (let i = 0; i < 4; i++) spawnEnemyWave();
-setInterval(spawnEnemyWave, 8000);
+
+function sameLoadout(a: ShipSnapshot['loadout'], b: ShipSnapshot['loadout']): boolean {
+  return a.front === b.front && a.left === b.left && a.right === b.right;
+}
+
+function syncCrates(crates: CrateInfo[]) {
+  const seen = new Set<string>();
+  for (const crate of crates) {
+    seen.add(crate.id);
+    if (renderedCrates.has(crate.id)) continue;
+    const mesh = buildCrateMesh();
+    mesh.position.set(crate.x, 0, crate.z);
+    scene.add(mesh);
+    renderedCrates.set(crate.id, mesh);
+  }
+  for (const [id, mesh] of renderedCrates) {
+    if (seen.has(id)) continue;
+    scene.remove(mesh);
+    renderedCrates.delete(id);
+  }
+}
+
+function clearWorldState() {
+  for (const ship of renderedShips.values()) scene.remove(ship.group);
+  renderedShips.clear();
+  for (const mesh of renderedCrates.values()) scene.remove(mesh);
+  renderedCrates.clear();
+  world = null;
+}
+
+// --- join screen --------------------------------------------------------
+function attemptJoin() {
+  const name = joinName.value.trim();
+  if (!name) {
+    joinStatus.textContent = 'Enter a captain name first.';
+    return;
+  }
+  joinBtn.disabled = true;
+  joinStatus.textContent = 'Connecting…';
+  const wsUrl = `ws://${window.location.hostname}:8787`;
+  network.connect(wsUrl, name);
+}
+joinBtn.addEventListener('click', attemptJoin);
+joinName.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') attemptJoin();
+});
+
+network.onWelcome = (msg) => {
+  clearWorldState();
+  world = new World(scene, msg.islands);
+  joinScreen.classList.add('hidden');
+};
+network.onDisconnect = () => {
+  clearWorldState();
+  joinScreen.classList.remove('hidden');
+  joinBtn.disabled = false;
+  joinStatus.textContent = 'Disconnected — check the server and try again.';
+};
+network.onState = (state) => {
+  hud.updateEconomy(state.you);
+  syncCrates(state.crates);
+};
+network.onEvents = (events) => handleEvents(events);
+
+// --- shipyard wiring ---------------------------------------------------
+hud.onBuy = (key) => network.buyUpgrade(key);
+hud.onSlotChange = (side, delta) => network.changeLoadout(side, delta);
+hud.onShipyardClose = () => {};
+portBtn.addEventListener('click', () => {
+  if (!hud.isShipyardOpen()) hud.showShipyard();
+});
 
 // --- input ------------------------------------------------------------------
 const input = new InputManager();
@@ -155,13 +189,12 @@ const input = new InputManager();
 const cameraOffset = new THREE.Vector3(0, 7, 13);
 const cameraTarget = new THREE.Vector3();
 
-// --- damage flash -------------------------------------------------------
+// --- damage flash / screen shake -----------------------------------------
 let damageFlash = 0;
 function flashDamage() {
   damageFlash = 1;
 }
 
-// --- screen shake ---------------------------------------------------------
 let shakeTimeLeft = 0;
 let shakeDuration = 0;
 let shakeMagnitude = 0;
@@ -171,41 +204,41 @@ function triggerShake(duration: number, magnitude: number) {
   shakeMagnitude = magnitude;
 }
 
-// --- respawn ---------------------------------------------------------------
-let isSunk = false;
-function respawn() {
-  player.health = player.maxHealth;
-  player.alive = true;
-  player.resetSink();
-  player.position.set(0, 0, 45);
-  player.heading = Math.PI;
-  player.speed = 0;
-  isSunk = false;
-  hud.setHealth(player.health, player.maxHealth);
-  hud.showMessage('Rescued! Back at port.', 2500);
-}
-
-// --- shipyard wiring ---------------------------------------------------
-hud.onBuy = (key) => {
-  if (economy.buy(key)) {
-    player.stats = economy.shipStats();
-    player.health = Math.min(player.health, player.maxHealth);
-    if (key === 'hull') player.health = player.maxHealth;
-    if (key === 'powder') boostCharge = economy.powderKegCharges();
-    hud.refreshShipyard();
-    hud.setHealth(player.health, player.maxHealth);
+// --- server-driven juice: fire/splash/hit/sunk/message events -----------
+function handleEvents(events: GameEvent[]) {
+  for (const ev of events) {
+    if (ev.type === 'fire') {
+      const ship = renderedShips.get(ev.shipId);
+      if (!ship) continue;
+      const count = ship.loadout[ev.side];
+      if (count <= 0) continue;
+      const forward = ship.forwardDirection();
+      const right = new THREE.Vector3(forward.z, 0, -forward.x);
+      const dir = ev.side === 'front' ? forward : ev.side === 'left' ? right : right.clone().multiplyScalar(-1);
+      const origin = ship.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+      for (const offset of cannonMountOffsets(ev.side, count, ship.scale)) {
+        const worldOffset = forward.clone().multiplyScalar(offset.z).add(right.clone().multiplyScalar(offset.x));
+        effects.muzzleFlash(origin.clone().add(worldOffset), dir);
+      }
+      sound.cannonFire();
+    } else if (ev.type === 'splash') {
+      effects.splash(new THREE.Vector3(ev.x, ev.y, ev.z));
+    } else if (ev.type === 'hit') {
+      effects.impactSplinters(new THREE.Vector3(ev.x, ev.y, ev.z));
+      sound.hitImpact();
+      renderedShips.get(ev.targetId)?.flashHit();
+      if (ev.targetId === network.yourId) {
+        flashDamage();
+        triggerShake(0.35, 0.4);
+      }
+    } else if (ev.type === 'sunk') {
+      effects.sinkExplosion(new THREE.Vector3(ev.x, 0, ev.z));
+      sound.sink();
+    } else if (ev.type === 'message') {
+      hud.showMessage(ev.text, ev.duration);
+    }
   }
-};
-hud.onLoadoutChange = () => {
-  player.setLoadout(economy.loadout());
-};
-hud.onShipyardClose = () => {};
-portBtn.addEventListener('click', () => {
-  if (!hud.isShipyardOpen()) hud.showShipyard();
-});
-
-hud.setHealth(player.health, player.maxHealth);
-hud.setGold(economy.state.gold);
+}
 
 // --- main loop ---------------------------------------------------------
 const clock = new THREE.Clock();
@@ -215,83 +248,84 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
   ocean.update(elapsed);
-  world.update(elapsed, (x, z) => ocean.getHeightAt(x, z, elapsed));
   effects.update(dt);
+  for (const mesh of renderedCrates.values()) {
+    const h = ocean.getHeightAt(mesh.position.x, mesh.position.z, elapsed);
+    mesh.position.y = h + 0.3;
+    mesh.rotation.y = elapsed * 0.6;
+  }
 
   input.update();
-  const shipyardOpen = hud.isShipyardOpen();
 
-  if (!shipyardOpen && player.alive) {
-    // boost handling
-    if (boostTimer > 0) {
-      boostTimer -= dt;
-      boosting = true;
-      if (boostTimer <= 0) boosting = false;
-    } else if (input.state.boost && boostCharge >= 1) {
-      boostCharge -= 1;
-      boostTimer = BOOST_DURATION;
-      boosting = true;
-    }
-    if (!boosting && boostCharge < economy.powderKegCharges()) {
-      boostRechargeTimer += dt;
-      if (boostRechargeTimer >= BOOST_RECHARGE_TIME) {
-        boostRechargeTimer = 0;
-        boostCharge = Math.min(economy.powderKegCharges(), boostCharge + 1);
+  let mine: ShipSnapshot | undefined;
+  let myShip: Ship | undefined;
+
+  if (network.yourId && world) {
+    const activeInput = hud.isShipyardOpen() ? { turn: 0, throttle: 0, fire: false, boost: false } : input.state;
+    network.sendInput(activeInput);
+
+    const snapshot = network.getRenderShips();
+    const seenIds = new Set<string>();
+
+    for (const cur of snapshot) {
+      seenIds.add(cur.id);
+      const isYou = cur.id === network.yourId;
+
+      let ship = renderedShips.get(cur.id);
+      if (!ship) {
+        ship = new Ship(
+          { sailLevel: 0, cannonLevel: 0, hullLevel: 0 },
+          { ...shipVisualOptions(isYou, cur.isBot), loadout: cur.loadout },
+        );
+        scene.add(ship.group);
+        renderedShips.set(cur.id, ship);
+      }
+
+      if (!sameLoadout(ship.loadout, cur.loadout)) ship.setLoadout(cur.loadout);
+
+      ship.position.set(cur.x, 0, cur.z);
+      ship.heading = cur.heading;
+      ship.speed = cur.speed;
+      ship.health = cur.health;
+      ship.maxHealth = cur.maxHealth;
+      ship.alive = cur.alive;
+      if (cur.alive) ship.resetSink();
+      else ship.beginSinking();
+
+      ship.updateSink(dt);
+      ship.updateHitFlash(dt);
+      const h = ocean.getHeightAt(cur.x, cur.z, elapsed);
+      ship.syncVisual(h, elapsed);
+
+      if (isYou) {
+        mine = cur;
+        myShip = ship;
       }
     }
 
-    player.applyControls(input.state.turn, input.state.throttle, dt, boosting);
-    const prevPos = player.position.clone();
-    player.integrate(dt);
-    resolveIslandCollisions(player, prevPos);
-
-    if (input.state.fire) {
-      combat.fireFromShip(player, 'player');
+    for (const [id, ship] of renderedShips) {
+      if (seenIds.has(id)) continue;
+      scene.remove(ship.group);
+      renderedShips.delete(id);
     }
-    player.cannonCooldown = Math.max(0, player.cannonCooldown - dt);
+  }
 
-    combat.update(dt, player, (x, z) => ocean.getHeightAt(x, z, elapsed));
-
-    // gold pickups
-    for (const crate of world.crates) {
-      if (crate.collected) continue;
-      if (crate.position.distanceTo(player.position) < 3.2) {
-        world.collectCrate(crate);
-        economy.addGold(crate.value);
-        hud.showMessage(`+${crate.value} gold`, 1200);
-        hud.setGold(economy.state.gold);
-        setTimeout(() => world.spawnOneCrate(WORLD_RADIUS), 15000);
-      }
-    }
-    hud.setGold(economy.state.gold);
-
-    if (!player.alive && !isSunk) {
-      isSunk = true;
-      hud.showMessage('Your ship has sunk!', 3000);
-      setTimeout(respawn, 3000);
-    }
-
-    // shipyard prompt
-    const nearPort = world.isNearHomePort(player.position);
+  if (mine && myShip) {
+    hud.setHealth(mine.health, mine.maxHealth);
+    const nearPort = world!.isNearHomePort(new THREE.Vector3(mine.x, 0, mine.z));
     portBtn.classList.toggle('hidden', !nearPort);
+
+    const behind = myShip.forwardDirection().multiplyScalar(-1);
+    const desiredCamPos = myShip.group.position
+      .clone()
+      .addScaledVector(behind, cameraOffset.z)
+      .add(new THREE.Vector3(0, cameraOffset.y, 0));
+    camera.position.lerp(desiredCamPos, 1 - Math.pow(0.001, dt));
+    cameraTarget.lerp(myShip.group.position, 1 - Math.pow(0.0005, dt));
+    camera.lookAt(cameraTarget.x, cameraTarget.y + 1.5, cameraTarget.z);
   } else {
     portBtn.classList.add('hidden');
   }
-
-  player.updateSink(dt);
-  player.updateHitFlash(dt);
-  const waveH = ocean.getHeightAt(player.position.x, player.position.z, elapsed);
-  player.syncVisual(waveH, elapsed);
-
-  // camera follow
-  const behind = player.forwardDirection().multiplyScalar(-1);
-  const desiredCamPos = player.group.position
-    .clone()
-    .addScaledVector(behind, cameraOffset.z)
-    .add(new THREE.Vector3(0, cameraOffset.y, 0));
-  camera.position.lerp(desiredCamPos, 1 - Math.pow(0.001, dt));
-  cameraTarget.lerp(player.group.position, 1 - Math.pow(0.0005, dt));
-  camera.lookAt(cameraTarget.x, cameraTarget.y + 1.5, cameraTarget.z);
 
   if (shakeTimeLeft > 0) {
     shakeTimeLeft = Math.max(0, shakeTimeLeft - dt);
@@ -304,24 +338,6 @@ function animate() {
 
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
-}
-
-function resolveIslandCollisions(ship: Ship, prevPos: THREE.Vector3) {
-  for (const island of world.islands) {
-    const toShip = new THREE.Vector3().subVectors(ship.position, island.position);
-    toShip.y = 0;
-    const dist = toShip.length();
-    const minDist = island.radius + 2.5;
-    if (dist < minDist) {
-      if (dist < 0.001) {
-        ship.position.copy(prevPos);
-      } else {
-        toShip.normalize();
-        ship.position.copy(island.position).addScaledVector(toShip, minDist);
-      }
-      ship.speed *= 0.2;
-    }
-  }
 }
 
 requestAnimationFrame(animate);

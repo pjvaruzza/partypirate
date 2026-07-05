@@ -1,8 +1,11 @@
-import { Economy, MAX_LEVEL, type UpgradeKey, type CannonSide } from '../game/Economy';
+import { FRONT_SLOT_MAX, SIDE_SLOT_MAX, type CannonSide, type EconomySnapshot, type UpgradeKey } from '../shared/protocol';
 
 const UPGRADE_KEYS: UpgradeKey[] = ['sails', 'cannons', 'hull', 'powder'];
 const CANNON_SIDES: CannonSide[] = ['front', 'left', 'right'];
 
+/** Purely a display for whatever EconomySnapshot the server last confirmed —
+ * buy/loadout buttons just send requests over the network and wait for the
+ * next snapshot to reflect the result, rather than mutating local state. */
 export class HUD {
   private healthFill = document.getElementById('health-fill') as HTMLDivElement;
   private goldAmount = document.getElementById('gold-amount') as HTMLSpanElement;
@@ -11,34 +14,21 @@ export class HUD {
   private shipyardClose = document.getElementById('shipyard-close') as HTMLButtonElement;
   private slotsLabel = document.getElementById('cannon-slots-label') as HTMLSpanElement;
   private bannerTimeout: number | undefined;
+  private latestEconomy: EconomySnapshot | null = null;
 
   onBuy: ((key: UpgradeKey) => void) | null = null;
-  onLoadoutChange: (() => void) | null = null;
+  onSlotChange: ((side: CannonSide, delta: 1 | -1) => void) | null = null;
   onShipyardClose: (() => void) | null = null;
 
-  private economy: Economy;
-
-  constructor(economy: Economy) {
-    this.economy = economy;
+  constructor() {
     for (const key of UPGRADE_KEYS) {
       const row = document.querySelector(`.upgrade-row[data-upgrade="${key}"]`);
-      const btn = row?.querySelector('.buy-btn');
-      btn?.addEventListener('click', () => this.onBuy?.(key));
+      row?.querySelector('.buy-btn')?.addEventListener('click', () => this.onBuy?.(key));
     }
     for (const side of CANNON_SIDES) {
       const slot = document.querySelector(`.cannon-slot[data-side="${side}"]`);
-      slot?.querySelector('.slot-plus')?.addEventListener('click', () => {
-        if (this.economy.incrementSlot(side)) {
-          this.refreshShipyard();
-          this.onLoadoutChange?.();
-        }
-      });
-      slot?.querySelector('.slot-minus')?.addEventListener('click', () => {
-        if (this.economy.decrementSlot(side)) {
-          this.refreshShipyard();
-          this.onLoadoutChange?.();
-        }
-      });
+      slot?.querySelector('.slot-plus')?.addEventListener('click', () => this.onSlotChange?.(side, 1));
+      slot?.querySelector('.slot-minus')?.addEventListener('click', () => this.onSlotChange?.(side, -1));
     }
     this.shipyardClose.addEventListener('click', () => {
       this.hideShipyard();
@@ -47,7 +37,7 @@ export class HUD {
   }
 
   setHealth(current: number, max: number) {
-    const pct = Math.max(0, Math.min(1, current / max));
+    const pct = max > 0 ? Math.max(0, Math.min(1, current / max)) : 0;
     this.healthFill.style.width = `${pct * 100}%`;
   }
 
@@ -64,7 +54,7 @@ export class HUD {
 
   showShipyard() {
     this.shipyard.classList.remove('hidden');
-    this.refreshShipyard();
+    if (this.latestEconomy) this.renderShipyard(this.latestEconomy);
   }
 
   hideShipyard() {
@@ -75,30 +65,36 @@ export class HUD {
     return !this.shipyard.classList.contains('hidden');
   }
 
-  refreshShipyard() {
+  /** Call whenever a fresh server state arrives. */
+  updateEconomy(economy: EconomySnapshot) {
+    this.latestEconomy = economy;
+    this.setGold(economy.gold);
+    if (this.isShipyardOpen()) this.renderShipyard(economy);
+  }
+
+  private renderShipyard(economy: EconomySnapshot) {
     for (const key of UPGRADE_KEYS) {
       const row = document.querySelector(`.upgrade-row[data-upgrade="${key}"]`);
       if (!row) continue;
-      const level = this.economy.state[key];
       const levelEl = row.querySelector('.upgrade-level');
       const costEl = row.querySelector('.cost');
       const btn = row.querySelector('.buy-btn') as HTMLButtonElement;
-      if (level >= MAX_LEVEL) {
-        if (levelEl) levelEl.textContent = `(MAX)`;
+      if (economy.maxed[key]) {
+        if (levelEl) levelEl.textContent = '(MAX)';
         if (costEl) costEl.textContent = '';
         btn.disabled = true;
         btn.textContent = 'MAXED';
       } else {
-        if (levelEl) levelEl.textContent = `(Lv ${level})`;
-        const cost = this.economy.costFor(key);
+        if (levelEl) levelEl.textContent = `(Lv ${economy[key]})`;
+        const cost = economy.costs[key];
         if (costEl) costEl.textContent = String(cost);
         btn.innerHTML = `Buy <span class="cost">${cost}</span> 🪙`;
-        btn.disabled = !this.economy.canAfford(key);
+        btn.disabled = economy.gold < cost;
       }
     }
 
-    const unassigned = this.economy.unassignedCannonSlots();
-    this.slotsLabel.textContent = `${this.economy.assignedCannonSlots()}/${this.economy.totalCannonSlots()} mounted${
+    const unassigned = economy.totalCannonSlots - economy.assignedCannonSlots;
+    this.slotsLabel.textContent = `${economy.assignedCannonSlots}/${economy.totalCannonSlots} mounted${
       unassigned > 0 ? ` · ${unassigned} unassigned` : ''
     }`;
     for (const side of CANNON_SIDES) {
@@ -107,11 +103,10 @@ export class HUD {
       const countEl = slot.querySelector('.slot-count') as HTMLSpanElement;
       const plusBtn = slot.querySelector('.slot-plus') as HTMLButtonElement;
       const minusBtn = slot.querySelector('.slot-minus') as HTMLButtonElement;
-      countEl.textContent = String(this.economy.state.loadout[side]);
-      plusBtn.disabled = !this.economy.canIncrementSlot(side);
-      minusBtn.disabled = !this.economy.canDecrementSlot(side);
+      const sideMax = side === 'front' ? FRONT_SLOT_MAX : SIDE_SLOT_MAX;
+      countEl.textContent = String(economy.loadout[side]);
+      plusBtn.disabled = unassigned <= 0 || economy.loadout[side] >= sideMax;
+      minusBtn.disabled = economy.loadout[side] <= 0;
     }
-
-    this.setGold(this.economy.state.gold);
   }
 }
