@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { woodGrainTexture, sailClothTexture } from './Textures';
 
 export interface ShipStats {
   sailLevel: number; // affects top speed & acceleration
@@ -58,7 +59,7 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
   pos.needsUpdate = true;
   hullGeo.computeVertexNormals();
 
-  const hullMat = new THREE.MeshStandardMaterial({ color: hullColor, roughness: 0.75 });
+  const hullMat = new THREE.MeshStandardMaterial({ color: hullColor, roughness: 0.75, map: woodGrainTexture() });
   const hull = new THREE.Mesh(hullGeo, hullMat);
   hull.position.y = 0.35 * scale;
   hull.castShadow = true;
@@ -66,12 +67,12 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
   group.add(hull);
 
   const deckGeo = new THREE.BoxGeometry(1.3 * scale, 0.1 * scale, 3.4 * scale);
-  const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6437, roughness: 0.9 });
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6437, roughness: 0.9, map: woodGrainTexture() });
   const deck = new THREE.Mesh(deckGeo, deckMat);
   deck.position.y = 0.75 * scale;
   group.add(deck);
 
-  const mastGeo = new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, 3.2 * scale, 8);
+  const mastGeo = new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, 3.2 * scale, 16);
   const mastMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21 });
   const mast = new THREE.Mesh(mastGeo, mastMat);
   mast.position.set(0, 2.1 * scale, -0.2 * scale);
@@ -83,6 +84,7 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
     color: sailColor,
     side: THREE.DoubleSide,
     roughness: 0.85,
+    map: sailClothTexture(),
   });
   const sail = new THREE.Mesh(sailGeo, sailMat);
   sail.position.set(0, 2.2 * scale, -0.19 * scale);
@@ -100,7 +102,7 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
 }
 
 function buildCannonBarrel(scale: number): THREE.Mesh {
-  const geo = new THREE.CylinderGeometry(0.07 * scale, 0.09 * scale, 0.55 * scale, 8);
+  const geo = new THREE.CylinderGeometry(0.07 * scale, 0.09 * scale, 0.55 * scale, 16);
   const mat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.4, roughness: 0.6 });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;

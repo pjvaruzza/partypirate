@@ -27,7 +27,7 @@ export class Cannonball {
     this.velocity = velocity.clone();
     this.damage = damage;
     this.owner = owner;
-    const geo = new THREE.SphereGeometry(0.22, 8, 8);
+    const geo = new THREE.SphereGeometry(0.22, 12, 12);
     const mat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.position.copy(this.position);

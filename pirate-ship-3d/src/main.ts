@@ -19,14 +19,34 @@ const MAX_ENEMIES = 6;
 const BOOST_DURATION = 4;
 const BOOST_RECHARGE_TIME = 12;
 
+function createSkyTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+  gradient.addColorStop(0, '#3f7fc4');
+  gradient.addColorStop(0.55, '#9fd8f0');
+  gradient.addColorStop(1, '#e3f5fb');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 2, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 // --- renderer / scene / camera -------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fd8f0);
-scene.fog = new THREE.Fog(0x9fd8f0, 200, 950);
+scene.background = createSkyTexture();
+scene.fog = new THREE.Fog(0xcfeaf6, 200, 950);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
 
