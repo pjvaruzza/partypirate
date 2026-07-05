@@ -44,6 +44,38 @@ export function cannonMountOffsets(side: CannonSide, count: number, scale: numbe
   }));
 }
 
+/** A cylinder stretched and oriented between two arbitrary points — used for
+ * the bowsprit and the rigging lines. */
+function buildSpar(from: THREE.Vector3, to: THREE.Vector3, radiusStart: number, radiusEnd: number, color: number): THREE.Mesh {
+  const dir = new THREE.Vector3().subVectors(to, from);
+  const length = dir.length();
+  const geo = new THREE.CylinderGeometry(radiusEnd, radiusStart, length, 8);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color }));
+  mesh.position.copy(from).addScaledVector(dir, 0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  return mesh;
+}
+
+/** A single flat triangular sail (the jib), since PlaneGeometry can't make
+ * that shape. */
+function buildTriangleSail(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: number): THREE.Mesh {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array([a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]), 3),
+  );
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0]), 2));
+  geo.setIndex([0, 1, 2]);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    side: THREE.DoubleSide,
+    roughness: 0.85,
+    map: sailClothTexture(),
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
 function buildHull(hullColor: number, sailColor: number, scale: number): THREE.Group {
   const group = new THREE.Group();
 
@@ -97,6 +129,46 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
   flag.rotation.z = Math.PI / 2;
   flag.position.set(0, 3.75 * scale, -0.2 * scale);
   group.add(flag);
+
+  // --- gunwale trim -----------------------------------------------------
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x40291a, roughness: 0.7 });
+  const railY = 0.91 * scale;
+  const leftRail = new THREE.Mesh(new THREE.BoxGeometry(0.08 * scale, 0.22 * scale, 3.6 * scale), trimMat);
+  leftRail.position.set(0.62 * scale, railY, 0);
+  group.add(leftRail);
+  const rightRail = new THREE.Mesh(new THREE.BoxGeometry(0.08 * scale, 0.22 * scale, 3.6 * scale), trimMat);
+  rightRail.position.set(-0.62 * scale, railY, 0);
+  group.add(rightRail);
+  const sternRail = new THREE.Mesh(new THREE.BoxGeometry(1.2 * scale, 0.22 * scale, 0.08 * scale), trimMat);
+  sternRail.position.set(0, railY, -1.65 * scale);
+  group.add(sternRail);
+
+  // --- quarterdeck --------------------------------------------------------
+  const quarterDeck = new THREE.Mesh(new THREE.BoxGeometry(1.0 * scale, 0.3 * scale, 1.0 * scale), deckMat);
+  quarterDeck.position.set(0, 0.95 * scale, -1.3 * scale);
+  quarterDeck.castShadow = true;
+  group.add(quarterDeck);
+
+  // --- bowsprit + jib -------------------------------------------------------
+  const bowTip = new THREE.Vector3(0, 1.0 * scale, 3.15 * scale);
+  const bowsprit = buildSpar(new THREE.Vector3(0, 0.55 * scale, 1.85 * scale), bowTip, 0.09 * scale, 0.04 * scale, 0x5c3a21);
+  bowsprit.castShadow = true;
+  group.add(bowsprit);
+
+  const jib = buildTriangleSail(
+    bowTip,
+    new THREE.Vector3(0, 0.8 * scale, 0.1 * scale),
+    new THREE.Vector3(0, 2.35 * scale, -0.2 * scale),
+    sailColor,
+  );
+  jib.name = 'jib';
+  group.add(jib);
+
+  // --- rigging --------------------------------------------------------------
+  const mastTop = new THREE.Vector3(0, 3.55 * scale, -0.2 * scale);
+  const ropeColor = 0x2a2018;
+  group.add(buildSpar(mastTop, bowTip, 0.015 * scale, 0.015 * scale, ropeColor));
+  group.add(buildSpar(mastTop, new THREE.Vector3(0, railY, -1.65 * scale), 0.015 * scale, 0.015 * scale, ropeColor));
 
   return group;
 }
