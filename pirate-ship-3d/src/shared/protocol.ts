@@ -39,7 +39,17 @@ export interface ClientLoadoutMessage {
   delta: 1 | -1;
 }
 
-export type ClientMessage = ClientJoinMessage | ClientInputMessage | ClientBuyMessage | ClientLoadoutMessage;
+export interface ClientChatMessage {
+  type: 'chat';
+  text: string;
+}
+
+export type ClientMessage =
+  | ClientJoinMessage
+  | ClientInputMessage
+  | ClientBuyMessage
+  | ClientLoadoutMessage
+  | ClientChatMessage;
 
 export interface IslandInfo {
   x: number;
@@ -112,7 +122,8 @@ export type GameEvent =
   | { type: 'hit'; x: number; y: number; z: number; targetId: string }
   | { type: 'sunk'; shipId: string; x: number; z: number }
   | { type: 'gold'; amount: number; for: string }
-  | { type: 'message'; text: string; duration?: number; for?: string };
+  | { type: 'message'; text: string; duration?: number; for?: string }
+  | { type: 'chat'; name: string; text: string };
 
 export interface EventsMessage {
   type: 'events';

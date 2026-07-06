@@ -35,6 +35,8 @@ const BOOST_DURATION = 4;
 const BOOST_RECHARGE_TIME = 12;
 const HIT_RADIUS = 3;
 const CRATE_RADIUS = 3.2;
+const RECONNECT_GRACE_MS = 60_000;
+const CHAT_MAX_LENGTH = 140;
 
 const BASE_COST: Record<UpgradeKey, number> = { sails: 40, cannons: 50, hull: 45, powder: 60 };
 const COST_GROWTH = 1.55;
@@ -60,6 +62,10 @@ export interface PlayerShip extends BaseShip {
   boostCharge: number;
   boostTimer: number;
   boostRechargeTimer: number;
+  /** Set while the socket is disconnected; the ship sits frozen in the world
+   * for RECONNECT_GRACE_MS so the same captain name can reclaim it instead
+   * of respawning fresh at port. */
+  disconnectedAt: number | null;
 }
 
 export interface BotShip extends BaseShip {
@@ -108,15 +114,41 @@ export class GameRoom {
       boostCharge: economy.powder,
       boostTimer: 0,
       boostRechargeTimer: 0,
+      disconnectedAt: null,
     };
     this.ships.set(id, ship);
     return ship;
   }
 
-  removePlayer(id: string) {
+  /** A ship whose socket dropped less than RECONNECT_GRACE_MS ago, if any —
+   * used to reclaim it instead of spawning a fresh one at port. */
+  findReclaimableShip(name: string): PlayerShip | undefined {
+    for (const ship of this.ships.values()) {
+      if (!ship.isBot && ship.name === name && ship.disconnectedAt !== null) return ship;
+    }
+    return undefined;
+  }
+
+  reconnectPlayer(ship: PlayerShip, socket: WebSocket) {
+    ship.socket = socket;
+    ship.disconnectedAt = null;
+    ship.input = { turn: 0, throttle: 0, fire: false, boost: false };
+  }
+
+  /** Freezes the ship in place rather than deleting it immediately — see
+   * findReclaimableShip / reconnectPlayer, and the sweep in tick(). */
+  disconnectPlayer(id: string) {
     const ship = this.ships.get(id);
-    if (ship && !ship.isBot) savePlayer(ship.name, ship.economy);
-    this.ships.delete(id);
+    if (!ship || ship.isBot) return;
+    ship.input = { turn: 0, throttle: 0, fire: false, boost: false };
+    ship.disconnectedAt = Date.now();
+    this.persist(ship);
+  }
+
+  chat(ship: PlayerShip, text: string) {
+    const trimmed = text.trim().slice(0, CHAT_MAX_LENGTH);
+    if (!trimmed) return;
+    this.events.push({ type: 'chat', name: ship.name, text: trimmed });
   }
 
   private persist(ship: PlayerShip) {
@@ -361,12 +393,26 @@ export class GameRoom {
     }
   }
 
-  tick(dt: number) {
+  /** Call after broadcasting a tick's events — not at the start of tick()
+   * itself, since chat messages arrive asynchronously between ticks via the
+   * WebSocket handler and would otherwise get wiped by the next tick before
+   * broadcast() ever reads them. */
+  clearEvents() {
     this.events = [];
+  }
+
+  tick(dt: number) {
     this.enemySpawnTimer += dt;
     if (this.enemySpawnTimer > ENEMY_SPAWN_INTERVAL) {
       this.enemySpawnTimer = 0;
       this.spawnBotWave();
+    }
+
+    const now = Date.now();
+    for (const ship of this.ships.values()) {
+      if (!ship.isBot && ship.disconnectedAt !== null && now - ship.disconnectedAt > RECONNECT_GRACE_MS) {
+        this.ships.delete(ship.id);
+      }
     }
 
     const alivePlayers = [...this.ships.values()].filter((s): s is PlayerShip => !s.isBot && s.alive);

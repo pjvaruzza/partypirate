@@ -85,6 +85,10 @@ export class Network {
     this.send({ type: 'loadout', side, delta });
   }
 
+  sendChat(text: string) {
+    this.send({ type: 'chat', text });
+  }
+
   /** The latest confirmed state, undelayed — used for HUD/economy display. */
   get state(): StateMessage | null {
     return this.latestState;

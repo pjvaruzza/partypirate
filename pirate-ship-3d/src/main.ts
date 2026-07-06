@@ -7,6 +7,7 @@ import { InputManager } from './game/Input';
 import { Effects } from './game/Effects';
 import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
+import { Chat } from './ui/Chat';
 import { Network } from './net/Network';
 import type { CrateInfo, GameEvent, ShipSnapshot } from './shared/protocol';
 
@@ -98,9 +99,11 @@ muteBtn?.addEventListener('click', () => {
   muteBtn.textContent = muted ? '🔇' : '🔊';
 });
 
-// --- HUD / network ----------------------------------------------------------
+// --- HUD / chat / network ----------------------------------------------------
 const hud = new HUD();
+const chat = new Chat();
 const network = new Network();
+chat.onSend = (text) => network.sendChat(text);
 
 const renderedShips = new Map<string, Ship>();
 const renderedCrates = new Map<string, THREE.Mesh>();
@@ -236,6 +239,8 @@ function handleEvents(events: GameEvent[]) {
       sound.sink();
     } else if (ev.type === 'message') {
       hud.showMessage(ev.text, ev.duration);
+    } else if (ev.type === 'chat') {
+      chat.addMessage(ev.name, ev.text);
     }
   }
 }
@@ -261,7 +266,8 @@ function animate() {
   let myShip: Ship | undefined;
 
   if (network.yourId && world) {
-    const activeInput = hud.isShipyardOpen() ? { turn: 0, throttle: 0, fire: false, boost: false } : input.state;
+    const suppressInput = hud.isShipyardOpen() || chat.isOpen();
+    const activeInput = suppressInput ? { turn: 0, throttle: 0, fire: false, boost: false } : input.state;
     network.sendInput(activeInput);
 
     const snapshot = network.getRenderShips();

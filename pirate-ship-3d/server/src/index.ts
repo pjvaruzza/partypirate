@@ -31,11 +31,17 @@ wss.on('connection', (socket: WebSocket) => {
     if (msg.type === 'join') {
       if (shipId) return;
       const name = String(msg.name || 'Captain').trim().slice(0, MAX_NAME_LENGTH) || 'Captain';
-      const economy = loadPlayer(name);
-      const id = randomUUID();
-      shipId = id;
-      room.addPlayer(id, name, socket, economy);
-      send(socket, { type: 'welcome', yourId: id, worldRadius: room.worldRadius, islands: room.islands });
+
+      const reclaimable = room.findReclaimableShip(name);
+      if (reclaimable) {
+        room.reconnectPlayer(reclaimable, socket);
+        shipId = reclaimable.id;
+      } else {
+        const economy = loadPlayer(name);
+        shipId = randomUUID();
+        room.addPlayer(shipId, name, socket, economy);
+      }
+      send(socket, { type: 'welcome', yourId: shipId, worldRadius: room.worldRadius, islands: room.islands });
       return;
     }
 
@@ -49,11 +55,13 @@ wss.on('connection', (socket: WebSocket) => {
       room.buyUpgrade(ship, msg.key);
     } else if (msg.type === 'loadout') {
       room.setLoadoutSlot(ship, msg.side, msg.delta);
+    } else if (msg.type === 'chat') {
+      room.chat(ship, msg.text);
     }
   });
 
   socket.on('close', () => {
-    if (shipId) room.removePlayer(shipId);
+    if (shipId) room.disconnectPlayer(shipId);
   });
 });
 
@@ -86,13 +94,15 @@ function broadcast() {
     .map((c) => ({ id: c.id, x: c.x, z: c.z, value: c.value }));
 
   for (const ship of room.ships.values()) {
-    if (ship.isBot) continue;
+    if (ship.isBot || ship.disconnectedAt !== null) continue;
     const you = room.buildEconomySnapshot(ship);
     send(ship.socket, { type: 'state', ships: shipsSnapshot, cannonballs: cannonballsSnapshot, crates: cratesSnapshot, you });
 
     const personalEvents = room.events.filter((e) => !('for' in e) || e.for === undefined || e.for === ship.id);
     if (personalEvents.length > 0) send(ship.socket, { type: 'events', events: personalEvents });
   }
+
+  room.clearEvents();
 }
 
 function shutdown() {

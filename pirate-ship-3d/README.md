@@ -38,6 +38,13 @@ server-side per captain name — reconnect with the same name to pick up where
 you left off. There's no password; this is trust-based, meant for a small
 group of friends rather than a public server.
 
+If your connection drops mid-session, rejoining with the same name within
+60 seconds reclaims your exact ship (position and health included) instead
+of respawning you fresh at port.
+
+Press **Enter** anywhere in-game to open a chat box, Enter again to send,
+Escape to cancel — messages are visible to everyone in the world.
+
 Bots are hostile to all players; players can't damage each other (no PvP
 yet — see `ROADMAP.md`).
 

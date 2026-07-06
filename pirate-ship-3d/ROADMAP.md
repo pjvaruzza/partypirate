@@ -96,15 +96,20 @@ this first cut:
 - **Rooms/matchmaking (M):** one fixed world today — fine for a few friends,
   but there's no way to run multiple simultaneous games from one server
   process.
-- **Reconnect handling (S):** dropping and rejoining currently just spawns a
-  fresh ship at port (progress is safe, but you lose your spot mid-fight);
-  a short grace period to reclaim the same in-progress ship would feel better.
-- **Chat/pings (S):** no in-game communication yet beyond seeing each other's
-  ships — even a simple text chat or map-ping would help coordination.
+- [x] **Reconnect handling (S):** a dropped socket now freezes the ship in
+  place (frozen "ghost ship," still visible to others) for 60s instead of
+  deleting it; rejoining with the same captain name within that window
+  reclaims the exact ship — position, health, and all — instead of
+  respawning fresh at port.
+- [x] **Chat (S):** simple text chat — press Enter anywhere to open a chat
+  box, Enter again to send, Escape to cancel. Broadcast to everyone in the
+  world, rendered with HTML-escaped text since it comes from other players.
+  Still open: map pings specifically (a non-text "look here" marker).
 
 ---
 
-**Suggested next session's focus:** the multiplayer core (server-authoritative
-movement/combat/bots/persistence) is working for a LAN friend group. PvP and
-better reconnect handling are the highest-leverage next steps to make it feel
-like a finished multiplayer game rather than a working prototype.
+**Suggested next session's focus:** the multiplayer basics (reconnect + chat)
+are done. PvP (with an opt-in toggle so it doesn't wreck the co-op default)
+is the next highest-leverage piece — everything else in this list (rooms,
+internet hosting) matters more once there's an actual reason to run more
+than one instance.

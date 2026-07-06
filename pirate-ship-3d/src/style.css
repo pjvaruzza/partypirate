@@ -357,6 +357,64 @@ body {
   display: none;
 }
 
+#chat-log {
+  position: absolute;
+  left: 16px;
+  bottom: 170px;
+  width: min(320px, 60vw);
+  max-height: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.chat-line {
+  background: rgba(0, 0, 0, 0.45);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  width: fit-content;
+  max-width: 100%;
+  word-break: break-word;
+  opacity: 1;
+  transition: opacity 1.2s ease;
+}
+
+.chat-line.fade {
+  opacity: 0;
+}
+
+.chat-name {
+  font-weight: 700;
+  color: #ffd27a;
+}
+
+#chat-input-wrap {
+  position: absolute;
+  left: 16px;
+  bottom: 170px;
+  width: min(320px, 60vw);
+  pointer-events: auto;
+}
+
+#chat-input-wrap.hidden {
+  display: none;
+}
+
+#chat-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
 #touch-controls {
   position: absolute;
   inset: 0;
