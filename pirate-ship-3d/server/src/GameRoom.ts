@@ -44,6 +44,9 @@ const TREASURE_DIG_RADIUS = 6;
 const TREASURE_BASE_REWARD = 200;
 const TREASURE_REWARD_PER_HUNT = 50;
 const TREASURE_REWARD_CAP = 600;
+/** Every Nth completed treasure hunt spawns a boss instead of just paying out. */
+const BOSS_INTERVAL = 5;
+const BOSS_NAMES = ["The Kraken's Bane", "Widow's Reckoning", 'The Crimson Leviathan', 'Ghost of the Abyss'];
 
 const BASE_COST: Record<UpgradeKey, number> = { sails: 40, cannons: 50, hull: 45, powder: 60 };
 const COST_GROWTH = 1.55;
@@ -95,6 +98,7 @@ export interface PlayerShip extends BaseShip {
 
 export interface BotShip extends BaseShip {
   isBot: true;
+  isBoss: boolean;
   ai: BotAiState;
   goldReward: number;
 }
@@ -194,6 +198,7 @@ export class GameRoom {
       id,
       name: `Enemy Tier ${tier + 1}`,
       isBot: true,
+      isBoss: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
       loadout: { front: 0, left: 1, right: 1 },
@@ -210,6 +215,41 @@ export class GameRoom {
       goldReward: 25 + tier * 20,
     };
     this.ships.set(id, bot);
+  }
+
+  /** The payoff of a completed treasure-hunt chain (see updateTreasureHunts):
+   * a rare, tougher bot that escalates in difficulty and reward each time a
+   * player reaches another BOSS_INTERVAL milestone. */
+  private spawnBossShip(nearX: number, nearZ: number, targetPlayerId: string, bossNumber: number) {
+    const tier = 4 + bossNumber;
+    const stats: ShipStats = { sailLevel: tier, cannonLevel: tier, hullLevel: tier + 2 };
+    const id = randomUUID();
+    const angle = Math.random() * Math.PI * 2;
+    const x = nearX + Math.cos(angle) * 50;
+    const z = nearZ + Math.sin(angle) * 50;
+    const boss: BotShip = {
+      id,
+      name: BOSS_NAMES[(bossNumber - 1) % BOSS_NAMES.length],
+      isBot: true,
+      isBoss: true,
+      body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
+      stats,
+      loadout: { front: 0, left: 2, right: 2 },
+      health: maxHealthFor(stats) * 1.8,
+      maxHealth: maxHealthFor(stats) * 1.8,
+      cannonCooldown: 0,
+      alive: true,
+      deathTimer: 0,
+      ai: { state: 'patrol', patrolX: x, patrolZ: z },
+      goldReward: 1000 + bossNumber * 500,
+    };
+    this.ships.set(id, boss);
+    this.events.push({
+      type: 'message',
+      text: `${boss.name} has appeared nearby! Sink it for a legendary reward.`,
+      duration: 4000,
+      for: targetPlayerId,
+    });
   }
 
   buyUpgrade(ship: PlayerShip, key: UpgradeKey): boolean {
@@ -407,10 +447,13 @@ export class GameRoom {
               this.events.push({ type: 'gold', amount: ship.goldReward, for: killer.id });
               this.events.push({
                 type: 'message',
-                text: `Enemy sunk! +${ship.goldReward} gold`,
+                text: ship.isBoss
+                  ? `${ship.name} defeated! +${ship.goldReward} gold — a legendary victory!`
+                  : `Enemy sunk! +${ship.goldReward} gold`,
+                duration: ship.isBoss ? 4000 : undefined,
                 for: killer.id,
               });
-              if (!killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
+              if (!ship.isBoss && !killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
                 killer.economy.treasureHunt = this.pickTreasureSite();
                 this.events.push({
                   type: 'message',
@@ -473,6 +516,10 @@ export class GameRoom {
       this.events.push({ type: 'gold', amount: reward, for: ship.id });
       this.events.push({ type: 'message', text: `Treasure found! +${reward} gold`, duration: 2500, for: ship.id });
       this.persist(ship);
+
+      if (ship.economy.treasureHuntsCompleted % BOSS_INTERVAL === 0) {
+        this.spawnBossShip(ship.body.x, ship.body.z, ship.id, ship.economy.treasureHuntsCompleted / BOSS_INTERVAL);
+      }
     }
   }
 

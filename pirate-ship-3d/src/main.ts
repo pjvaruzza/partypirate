@@ -112,6 +112,7 @@ const renderedCrates = new Map<string, THREE.Mesh>();
 const treasureMarker = new TreasureMarker(scene);
 
 function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
+  if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5 };
   if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
   const scale = SHIP_CLASS_SCALE[ship.shipClass];
   if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xf2ead6, scale };

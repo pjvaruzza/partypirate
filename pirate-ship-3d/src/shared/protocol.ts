@@ -85,6 +85,9 @@ export interface ShipSnapshot {
   id: string;
   name: string;
   isBot: boolean;
+  /** A rare, tougher bot spawned as the payoff of a treasure-hunt chain —
+   * always false for players. */
+  isBoss: boolean;
   shipClass: ShipClass;
   x: number;
   z: number;

@@ -81,6 +81,7 @@ function broadcast() {
     id: s.id,
     name: s.name,
     isBot: s.isBot,
+    isBoss: s.isBot ? s.isBoss : false,
     shipClass: s.isBot ? 'sloop' : s.economy.shipClass,
     x: s.body.x,
     z: s.body.z,

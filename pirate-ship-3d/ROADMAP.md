@@ -47,12 +47,17 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   purchases in the shipyard, server-authoritative. Still open: a genuinely
   different hull shape per class (currently same model, scaled) and a second
   mast for the bigger classes.
-- [x] **Quests/treasure maps (M/L, first slice):** sinking a bot has a 25%
-  chance to drop a torn map (if you don't already have one active),
-  revealing a glowing marker at a random island; sailing into range digs up
-  200–600 gold (scaling with hunts completed). Still open: the "legendary
-  boss ship" payoff chain the original idea described — right now it's a
-  repeatable bonus, not an escalating quest line toward something unique.
+- [x] **Quests/treasure maps (M/L):** sinking a bot has a 25% chance to drop
+  a torn map (if you don't already have one active), revealing a glowing
+  marker at a random island; sailing into range digs up 200–600 gold
+  (scaling with hunts completed). Every 5th completed hunt now spawns a
+  legendary boss ship near you instead — a much tougher bot (612 HP vs. a
+  normal Tier-4's 180, 4 broadside cannons) with an escalating name/reward
+  (1000, 1500, 2000g...) each time, rendered with a distinct black-hull/
+  blood-red-sail look and 1.5x scale. Closes the original "quest chain
+  building toward a legendary boss ship" idea. Still open: bosses currently
+  only ever spawn from this trigger and are otherwise identical bot AI —
+  a unique boss-only attack pattern would make them feel less like a reskin.
 - **Reputation/heat (M):** sinking ships raises a "wanted level" that spawns
   tougher hunter fleets the longer you stay out — a natural risk/reward timer
   that pushes you back toward port (classic push-your-luck loop).
@@ -115,11 +120,10 @@ this first cut:
 
 ---
 
-**Suggested next session's focus:** the world-builder loop now has a real
-progression arc (upgrades → ship class → treasure hunts). Good next steps,
-roughly in order: (1) close the treasure-map loop with an actual escalating
-chain toward a unique boss-ship payoff instead of a flat repeatable bonus,
-(2) reputation/heat, since it plays well against the bigger world treasure
-hunts already encourage exploring, (3) PvP with an opt-in toggle once the
-co-op progression loop feels rich enough to be worth defending from
-griefing.
+**Suggested next session's focus:** the world-builder loop now has a full
+progression arc (upgrades → ship class → treasure hunts → escalating boss
+fights). Good next steps, roughly in order: (1) reputation/heat, since it
+plays well against the bigger world exploration already encourages,
+(2) a unique boss attack pattern so legendary ships feel less like a reskin,
+(3) PvP with an opt-in toggle once the co-op progression loop feels rich
+enough to be worth defending from griefing.
