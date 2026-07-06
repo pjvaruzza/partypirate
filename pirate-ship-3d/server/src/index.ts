@@ -57,6 +57,8 @@ wss.on('connection', (socket: WebSocket) => {
       room.setLoadoutSlot(ship, msg.side, msg.delta);
     } else if (msg.type === 'chat') {
       room.chat(ship, msg.text);
+    } else if (msg.type === 'buyClass') {
+      room.buyShipClass(ship);
     }
   });
 
@@ -79,6 +81,7 @@ function broadcast() {
     id: s.id,
     name: s.name,
     isBot: s.isBot,
+    shipClass: s.isBot ? 'sloop' : s.economy.shipClass,
     x: s.body.x,
     z: s.body.z,
     heading: s.body.heading,

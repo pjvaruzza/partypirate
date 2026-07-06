@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CannonLoadout } from '../../src/shared/protocol';
+import type { CannonLoadout, ShipClass } from '../../src/shared/protocol';
 
 /** Captain-name-keyed save file — trust-based identity for a small friend
  * group, no accounts/passwords. Debounced writes so a burst of purchases
@@ -14,13 +14,26 @@ export interface PersistedEconomy {
   hull: number;
   powder: number;
   loadout: CannonLoadout;
+  shipClass: ShipClass;
+  treasureHuntsCompleted: number;
+  treasureHunt: { x: number; z: number } | null;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = path.join(__dirname, '..', 'data', 'players.json');
 
 function defaultEconomy(): PersistedEconomy {
-  return { gold: 0, sails: 0, cannons: 0, hull: 0, powder: 0, loadout: { front: 0, left: 1, right: 1 } };
+  return {
+    gold: 0,
+    sails: 0,
+    cannons: 0,
+    hull: 0,
+    powder: 0,
+    loadout: { front: 0, left: 1, right: 1 },
+    shipClass: 'sloop',
+    treasureHuntsCompleted: 0,
+    treasureHunt: null,
+  };
 }
 
 let cache: Record<string, PersistedEconomy> | null = null;

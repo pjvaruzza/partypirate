@@ -81,6 +81,10 @@ export class Network {
     this.send({ type: 'buy', key });
   }
 
+  buyShipClass() {
+    this.send({ type: 'buyClass' });
+  }
+
   changeLoadout(side: CannonSide, delta: 1 | -1) {
     this.send({ type: 'loadout', side, delta });
   }

@@ -18,6 +18,17 @@ export interface CannonLoadout {
 export type CannonSide = 'front' | 'left' | 'right';
 export type UpgradeKey = 'sails' | 'cannons' | 'hull' | 'powder';
 
+export type ShipClass = 'sloop' | 'brigantine' | 'galleon';
+export const SHIP_CLASS_ORDER: ShipClass[] = ['sloop', 'brigantine', 'galleon'];
+/** Visual scale per class — also used server-side for cannon mount offsets
+ * and hit-radius so bigger ships are both bigger targets and have cannons
+ * that visually line up with the bigger hull. */
+export const SHIP_CLASS_SCALE: Record<ShipClass, number> = {
+  sloop: 1,
+  brigantine: 1.3,
+  galleon: 1.6,
+};
+
 export interface ClientJoinMessage {
   type: 'join';
   name: string;
@@ -44,12 +55,17 @@ export interface ClientChatMessage {
   text: string;
 }
 
+export interface ClientBuyClassMessage {
+  type: 'buyClass';
+}
+
 export type ClientMessage =
   | ClientJoinMessage
   | ClientInputMessage
   | ClientBuyMessage
   | ClientLoadoutMessage
-  | ClientChatMessage;
+  | ClientChatMessage
+  | ClientBuyClassMessage;
 
 export interface IslandInfo {
   x: number;
@@ -69,6 +85,7 @@ export interface ShipSnapshot {
   id: string;
   name: string;
   isBot: boolean;
+  shipClass: ShipClass;
   x: number;
   z: number;
   heading: number;
@@ -97,6 +114,14 @@ export interface EconomySnapshot {
   maxed: Record<UpgradeKey, boolean>;
   totalCannonSlots: number;
   assignedCannonSlots: number;
+  shipClass: ShipClass;
+  /** null once already at the top class (galleon). */
+  nextClass: ShipClass | null;
+  nextClassCost: number | null;
+  treasureHuntsCompleted: number;
+  /** The dig site for this player's active treasure map, if any — only ever
+   * sent to the player who owns it. */
+  treasureHunt: { x: number; z: number } | null;
 }
 
 export interface WelcomeMessage {

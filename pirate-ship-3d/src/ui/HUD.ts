@@ -1,7 +1,8 @@
-import { FRONT_SLOT_MAX, SIDE_SLOT_MAX, type CannonSide, type EconomySnapshot, type UpgradeKey } from '../shared/protocol';
+import { FRONT_SLOT_MAX, SIDE_SLOT_MAX, type CannonSide, type EconomySnapshot, type ShipClass, type UpgradeKey } from '../shared/protocol';
 
 const UPGRADE_KEYS: UpgradeKey[] = ['sails', 'cannons', 'hull', 'powder'];
 const CANNON_SIDES: CannonSide[] = ['front', 'left', 'right'];
+const CLASS_NAMES: Record<ShipClass, string> = { sloop: 'Sloop', brigantine: 'Brigantine', galleon: 'Galleon' };
 
 /** Purely a display for whatever EconomySnapshot the server last confirmed —
  * buy/loadout buttons just send requests over the network and wait for the
@@ -13,11 +14,14 @@ export class HUD {
   private shipyard = document.getElementById('shipyard') as HTMLDivElement;
   private shipyardClose = document.getElementById('shipyard-close') as HTMLButtonElement;
   private slotsLabel = document.getElementById('cannon-slots-label') as HTMLSpanElement;
+  private className = document.getElementById('class-name') as HTMLSpanElement;
+  private classBuyBtn = document.getElementById('class-buy-btn') as HTMLButtonElement;
   private bannerTimeout: number | undefined;
   private latestEconomy: EconomySnapshot | null = null;
 
   onBuy: ((key: UpgradeKey) => void) | null = null;
   onSlotChange: ((side: CannonSide, delta: 1 | -1) => void) | null = null;
+  onBuyClass: (() => void) | null = null;
   onShipyardClose: (() => void) | null = null;
 
   constructor() {
@@ -30,6 +34,7 @@ export class HUD {
       slot?.querySelector('.slot-plus')?.addEventListener('click', () => this.onSlotChange?.(side, 1));
       slot?.querySelector('.slot-minus')?.addEventListener('click', () => this.onSlotChange?.(side, -1));
     }
+    this.classBuyBtn.addEventListener('click', () => this.onBuyClass?.());
     this.shipyardClose.addEventListener('click', () => {
       this.hideShipyard();
       this.onShipyardClose?.();
@@ -73,6 +78,15 @@ export class HUD {
   }
 
   private renderShipyard(economy: EconomySnapshot) {
+    this.className.textContent = `(${CLASS_NAMES[economy.shipClass]})`;
+    if (!economy.nextClass || economy.nextClassCost === null) {
+      this.classBuyBtn.disabled = true;
+      this.classBuyBtn.textContent = 'MAXED';
+    } else {
+      this.classBuyBtn.innerHTML = `Buy ${CLASS_NAMES[economy.nextClass]} <span class="cost">${economy.nextClassCost}</span> 🪙`;
+      this.classBuyBtn.disabled = economy.gold < economy.nextClassCost;
+    }
+
     for (const key of UPGRADE_KEYS) {
       const row = document.querySelector(`.upgrade-row[data-upgrade="${key}"]`);
       if (!row) continue;

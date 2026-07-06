@@ -3,13 +3,14 @@ import * as THREE from 'three';
 import { Ocean } from './game/Ocean';
 import { Ship, cannonMountOffsets } from './game/Ship';
 import { World, buildCrateMesh } from './game/World';
+import { TreasureMarker } from './game/TreasureMarker';
 import { InputManager } from './game/Input';
 import { Effects } from './game/Effects';
 import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
 import { Chat } from './ui/Chat';
 import { Network } from './net/Network';
-import type { CrateInfo, GameEvent, ShipSnapshot } from './shared/protocol';
+import { SHIP_CLASS_SCALE, type CrateInfo, type GameEvent, type ShipSnapshot } from './shared/protocol';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const portBtn = document.getElementById('port-btn') as HTMLButtonElement;
@@ -106,12 +107,15 @@ const network = new Network();
 chat.onSend = (text) => network.sendChat(text);
 
 const renderedShips = new Map<string, Ship>();
+const renderedShipClass = new Map<string, ShipSnapshot['shipClass']>();
 const renderedCrates = new Map<string, THREE.Mesh>();
+const treasureMarker = new TreasureMarker(scene);
 
-function shipVisualOptions(isYou: boolean, isBot: boolean) {
-  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xf2ead6, scale: 1 };
-  if (isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
-  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale: 1 };
+function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
+  if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
+  const scale = SHIP_CLASS_SCALE[ship.shipClass];
+  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xf2ead6, scale };
+  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale };
 }
 
 function sameLoadout(a: ShipSnapshot['loadout'], b: ShipSnapshot['loadout']): boolean {
@@ -138,8 +142,10 @@ function syncCrates(crates: CrateInfo[]) {
 function clearWorldState() {
   for (const ship of renderedShips.values()) scene.remove(ship.group);
   renderedShips.clear();
+  renderedShipClass.clear();
   for (const mesh of renderedCrates.values()) scene.remove(mesh);
   renderedCrates.clear();
+  treasureMarker.setTarget(null);
   world = null;
 }
 
@@ -174,12 +180,14 @@ network.onDisconnect = () => {
 network.onState = (state) => {
   hud.updateEconomy(state.you);
   syncCrates(state.crates);
+  treasureMarker.setTarget(state.you.treasureHunt);
 };
 network.onEvents = (events) => handleEvents(events);
 
 // --- shipyard wiring ---------------------------------------------------
 hud.onBuy = (key) => network.buyUpgrade(key);
 hud.onSlotChange = (side, delta) => network.changeLoadout(side, delta);
+hud.onBuyClass = () => network.buyShipClass();
 hud.onShipyardClose = () => {};
 portBtn.addEventListener('click', () => {
   if (!hud.isShipyardOpen()) hud.showShipyard();
@@ -259,6 +267,8 @@ function animate() {
     mesh.position.y = h + 0.3;
     mesh.rotation.y = elapsed * 0.6;
   }
+  const treasureH = ocean.getHeightAt(treasureMarker.group.position.x, treasureMarker.group.position.z, elapsed);
+  treasureMarker.update(dt, elapsed, treasureH);
 
   input.update();
 
@@ -278,13 +288,18 @@ function animate() {
       const isYou = cur.id === network.yourId;
 
       let ship = renderedShips.get(cur.id);
+      if (ship && renderedShipClass.get(cur.id) !== cur.shipClass) {
+        scene.remove(ship.group);
+        ship = undefined;
+      }
       if (!ship) {
         ship = new Ship(
           { sailLevel: 0, cannonLevel: 0, hullLevel: 0 },
-          { ...shipVisualOptions(isYou, cur.isBot), loadout: cur.loadout },
+          { ...shipVisualOptions(isYou, cur), loadout: cur.loadout },
         );
         scene.add(ship.group);
         renderedShips.set(cur.id, ship);
+        renderedShipClass.set(cur.id, cur.shipClass);
       }
 
       if (!sameLoadout(ship.loadout, cur.loadout)) ship.setLoadout(cur.loadout);
@@ -313,6 +328,7 @@ function animate() {
       if (seenIds.has(id)) continue;
       scene.remove(ship.group);
       renderedShips.delete(id);
+      renderedShipClass.delete(id);
     }
   }
 

@@ -40,12 +40,19 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
 
 ## Tier 3 — Progression & content
 
-- **Ship classes (M):** unlockable hulls (sloop → brigantine → galleon) with
-  different base stats and max cannon slots, instead of just leveling one
-  hull — gives a clearer sense of "growing" your ship.
-- **Quests/treasure maps (M/L):** islands hide buried treasure found via a
-  map fragment dropped by enemies or bought at port; a simple quest chain
-  building toward a legendary boss ship.
+- [x] **Ship classes (M):** three tiers — sloop (2 base cannon slots) →
+  brigantine (4 slots, 900g) → galleon (6 slots, 3000g) — each a real,
+  visible hull-size jump (1x/1.3x/1.6x scale) plus a stat bonus folded into
+  the existing sail/hull upgrade formulas as "free levels." One-time
+  purchases in the shipyard, server-authoritative. Still open: a genuinely
+  different hull shape per class (currently same model, scaled) and a second
+  mast for the bigger classes.
+- [x] **Quests/treasure maps (M/L, first slice):** sinking a bot has a 25%
+  chance to drop a torn map (if you don't already have one active),
+  revealing a glowing marker at a random island; sailing into range digs up
+  200–600 gold (scaling with hunts completed). Still open: the "legendary
+  boss ship" payoff chain the original idea described — right now it's a
+  repeatable bonus, not an escalating quest line toward something unique.
 - **Reputation/heat (M):** sinking ships raises a "wanted level" that spawns
   tougher hunter fleets the longer you stay out — a natural risk/reward timer
   that pushes you back toward port (classic push-your-luck loop).
@@ -108,8 +115,11 @@ this first cut:
 
 ---
 
-**Suggested next session's focus:** the multiplayer basics (reconnect + chat)
-are done. PvP (with an opt-in toggle so it doesn't wreck the co-op default)
-is the next highest-leverage piece — everything else in this list (rooms,
-internet hosting) matters more once there's an actual reason to run more
-than one instance.
+**Suggested next session's focus:** the world-builder loop now has a real
+progression arc (upgrades → ship class → treasure hunts). Good next steps,
+roughly in order: (1) close the treasure-map loop with an actual escalating
+chain toward a unique boss-ship payoff instead of a flat repeatable bonus,
+(2) reputation/heat, since it plays well against the bigger world treasure
+hunts already encourage exploring, (3) PvP with an opt-in toggle once the
+co-op progression loop feels rich enough to be worth defending from
+griefing.

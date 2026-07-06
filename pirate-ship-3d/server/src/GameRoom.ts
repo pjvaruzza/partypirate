@@ -13,9 +13,10 @@ import { generateIslands, homeSpawnPoint, resolveIslandCollisions, spawnCrate, t
 import { spawnCannonballs, updateBotAI, updateCannonball, type BotAiState, type CannonballState } from './CombatSim';
 import { savePlayer, type PersistedEconomy } from './persistence';
 import {
-  BASE_CANNON_SLOTS,
   FRONT_SLOT_MAX,
   MAX_LEVEL,
+  SHIP_CLASS_ORDER,
+  SHIP_CLASS_SCALE,
   SIDE_SLOT_MAX,
   type CannonLoadout,
   type CannonSide,
@@ -23,6 +24,7 @@ import {
   type GameEvent,
   type IslandInfo,
   type InputState,
+  type ShipClass,
   type UpgradeKey,
 } from '../../src/shared/protocol';
 
@@ -37,9 +39,32 @@ const HIT_RADIUS = 3;
 const CRATE_RADIUS = 3.2;
 const RECONNECT_GRACE_MS = 60_000;
 const CHAT_MAX_LENGTH = 140;
+const TREASURE_MAP_DROP_CHANCE = 0.25;
+const TREASURE_DIG_RADIUS = 6;
+const TREASURE_BASE_REWARD = 200;
+const TREASURE_REWARD_PER_HUNT = 50;
+const TREASURE_REWARD_CAP = 600;
 
 const BASE_COST: Record<UpgradeKey, number> = { sails: 40, cannons: 50, hull: 45, powder: 60 };
 const COST_GROWTH = 1.55;
+
+/** Ship class base cannon slots, one-time upgrade cost, and stat bonuses —
+ * bonuses are expressed as "free levels" folded into the existing
+ * sailLevel/hullLevel formulas so ShipSim.ts needs no changes. */
+const SHIP_CLASS_CONFIG: Record<ShipClass, { baseSlots: number; cost: number; hullLevelBonus: number; sailLevelBonus: number }> = {
+  sloop: { baseSlots: 2, cost: 0, hullLevelBonus: 0, sailLevelBonus: 0 },
+  brigantine: { baseSlots: 4, cost: 900, hullLevelBonus: 1.5, sailLevelBonus: 0.75 },
+  galleon: { baseSlots: 6, cost: 3000, hullLevelBonus: 3.5, sailLevelBonus: 1.5 },
+};
+
+function statsForEconomy(economy: PersistedEconomy): ShipStats {
+  const bonus = SHIP_CLASS_CONFIG[economy.shipClass];
+  return {
+    sailLevel: economy.sails + bonus.sailLevelBonus,
+    cannonLevel: economy.cannons,
+    hullLevel: economy.hull + bonus.hullLevelBonus,
+  };
+}
 
 interface BaseShip {
   id: string;
@@ -95,7 +120,7 @@ export class GameRoom {
 
   addPlayer(id: string, name: string, socket: WebSocket, economy: PersistedEconomy): PlayerShip {
     const spawn = homeSpawnPoint();
-    const stats: ShipStats = { sailLevel: economy.sails, cannonLevel: economy.cannons, hullLevel: economy.hull };
+    const stats = statsForEconomy(economy);
     const ship: PlayerShip = {
       id,
       name,
@@ -195,7 +220,7 @@ export class GameRoom {
 
     ship.economy.gold -= cost;
     ship.economy[key] += 1;
-    ship.stats = { sailLevel: ship.economy.sails, cannonLevel: ship.economy.cannons, hullLevel: ship.economy.hull };
+    ship.stats = statsForEconomy(ship.economy);
     ship.maxHealth = maxHealthFor(ship.stats);
     ship.health = key === 'hull' ? ship.maxHealth : Math.min(ship.health, ship.maxHealth);
     if (key === 'powder') ship.boostCharge = ship.economy.powder;
@@ -203,8 +228,23 @@ export class GameRoom {
     return true;
   }
 
+  buyShipClass(ship: PlayerShip): boolean {
+    const nextClass = SHIP_CLASS_ORDER[SHIP_CLASS_ORDER.indexOf(ship.economy.shipClass) + 1];
+    if (!nextClass) return false;
+    const cost = SHIP_CLASS_CONFIG[nextClass].cost;
+    if (ship.economy.gold < cost) return false;
+
+    ship.economy.gold -= cost;
+    ship.economy.shipClass = nextClass;
+    ship.stats = statsForEconomy(ship.economy);
+    ship.maxHealth = maxHealthFor(ship.stats);
+    ship.health = ship.maxHealth;
+    this.persist(ship);
+    return true;
+  }
+
   setLoadoutSlot(ship: PlayerShip, side: CannonSide, delta: 1 | -1): boolean {
-    const totalSlots = BASE_CANNON_SLOTS + ship.economy.cannons;
+    const totalSlots = SHIP_CLASS_CONFIG[ship.economy.shipClass].baseSlots + ship.economy.cannons;
     const assigned = ship.economy.loadout.front + ship.economy.loadout.left + ship.economy.loadout.right;
     const sideMax = side === 'front' ? FRONT_SLOT_MAX : SIDE_SLOT_MAX;
     if (delta > 0) {
@@ -227,6 +267,7 @@ export class GameRoom {
       maxed[key] = ship.economy[key] >= MAX_LEVEL;
       costs[key] = Math.round(BASE_COST[key] * Math.pow(COST_GROWTH, ship.economy[key]));
     }
+    const nextClass = SHIP_CLASS_ORDER[SHIP_CLASS_ORDER.indexOf(ship.economy.shipClass) + 1] ?? null;
     return {
       gold: ship.economy.gold,
       sails: ship.economy.sails,
@@ -236,13 +277,18 @@ export class GameRoom {
       loadout: { ...ship.economy.loadout },
       costs,
       maxed,
-      totalCannonSlots: BASE_CANNON_SLOTS + ship.economy.cannons,
+      totalCannonSlots: SHIP_CLASS_CONFIG[ship.economy.shipClass].baseSlots + ship.economy.cannons,
       assignedCannonSlots: ship.economy.loadout.front + ship.economy.loadout.left + ship.economy.loadout.right,
+      shipClass: ship.economy.shipClass,
+      nextClass,
+      nextClassCost: nextClass ? SHIP_CLASS_CONFIG[nextClass].cost : null,
+      treasureHuntsCompleted: ship.economy.treasureHuntsCompleted,
+      treasureHunt: ship.economy.treasureHunt,
     };
   }
 
   private fireShip(ship: AnyShip) {
-    const scale = ship.isBot ? 0.9 : 1;
+    const scale = ship.isBot ? 0.9 : SHIP_CLASS_SCALE[ship.economy.shipClass];
     const balls = spawnCannonballs(
       ship.id,
       ship.isBot,
@@ -343,7 +389,8 @@ export class GameRoom {
       if (!ball.alive) continue;
       for (const ship of this.ships.values()) {
         if (!ship.alive || ship.id === ball.ownerId || ship.isBot === ball.ownerIsBot) continue;
-        if (Math.hypot(ship.body.x - ball.x, ship.body.z - ball.z) >= HIT_RADIUS) continue;
+        const hitRadius = HIT_RADIUS * (ship.isBot ? 0.9 : SHIP_CLASS_SCALE[ship.economy.shipClass]);
+        if (Math.hypot(ship.body.x - ball.x, ship.body.z - ball.z) >= hitRadius) continue;
 
         ship.health = Math.max(0, ship.health - ball.damage);
         ball.alive = false;
@@ -363,6 +410,15 @@ export class GameRoom {
                 text: `Enemy sunk! +${ship.goldReward} gold`,
                 for: killer.id,
               });
+              if (!killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
+                killer.economy.treasureHunt = this.pickTreasureSite();
+                this.events.push({
+                  type: 'message',
+                  text: 'Found a torn treasure map! Sail toward the golden light.',
+                  duration: 3000,
+                  for: killer.id,
+                });
+              }
               this.persist(killer);
             }
           } else {
@@ -390,6 +446,33 @@ export class GameRoom {
           if (idx >= 0) this.crates[idx] = spawnCrate(this.islands, this.worldRadius);
         }, CRATE_RESPAWN_DELAY);
       }
+    }
+  }
+
+  private pickTreasureSite(): { x: number; z: number } {
+    const candidates = this.islands.filter((isl) => !isl.isHomePort);
+    const island = candidates[Math.floor(Math.random() * candidates.length)];
+    const angle = Math.random() * Math.PI * 2;
+    const dist = island.radius * 0.6;
+    return { x: island.x + Math.cos(angle) * dist, z: island.z + Math.sin(angle) * dist };
+  }
+
+  private updateTreasureHunts() {
+    for (const ship of this.ships.values()) {
+      if (ship.isBot || !ship.alive || !ship.economy.treasureHunt) continue;
+      const site = ship.economy.treasureHunt;
+      if (Math.hypot(site.x - ship.body.x, site.z - ship.body.z) >= TREASURE_DIG_RADIUS) continue;
+
+      const reward = Math.min(
+        TREASURE_REWARD_CAP,
+        TREASURE_BASE_REWARD + ship.economy.treasureHuntsCompleted * TREASURE_REWARD_PER_HUNT,
+      );
+      ship.economy.gold += reward;
+      ship.economy.treasureHuntsCompleted += 1;
+      ship.economy.treasureHunt = null;
+      this.events.push({ type: 'gold', amount: reward, for: ship.id });
+      this.events.push({ type: 'message', text: `Treasure found! +${reward} gold`, duration: 2500, for: ship.id });
+      this.persist(ship);
     }
   }
 
@@ -431,5 +514,6 @@ export class GameRoom {
     this.updateCannonballs(dt);
     this.resolveCombat();
     this.updateCrates();
+    this.updateTreasureHunts();
   }
 }
