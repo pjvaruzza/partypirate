@@ -47,6 +47,13 @@ const TREASURE_REWARD_CAP = 600;
 /** Every Nth completed treasure hunt spawns a boss instead of just paying out. */
 const BOSS_INTERVAL = 5;
 const BOSS_NAMES = ["The Kraken's Bane", "Widow's Reckoning", 'The Crimson Leviathan', 'Ghost of the Abyss'];
+/** Bosses reload faster and tolerate a wider firing angle than regular bots;
+ * both get more extreme once they drop below the enrage health threshold. */
+const BOSS_FIRE_WINDOW_DEG = 55;
+const BOSS_ENRAGED_FIRE_WINDOW_DEG = 75;
+const BOSS_RELOAD_MULT = 0.8;
+const BOSS_ENRAGED_RELOAD_MULT = 0.45;
+const BOSS_ENRAGE_HEALTH_FRACTION = 0.35;
 
 const HEAT_MAX = 100;
 const HEAT_PER_GOLD_EARNED = 0.15;
@@ -110,6 +117,8 @@ export interface PlayerShip extends BaseShip {
 export interface BotShip extends BaseShip {
   isBot: true;
   isBoss: boolean;
+  /** One-way flip when a boss drops below BOSS_ENRAGE_HEALTH_FRACTION — see updateBot. */
+  enraged: boolean;
   ai: BotAiState;
   goldReward: number;
 }
@@ -212,6 +221,7 @@ export class GameRoom {
       name: `Enemy Tier ${tier + 1}`,
       isBot: true,
       isBoss: false,
+      enraged: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
       loadout: { front: 0, left: 1, right: 1 },
@@ -245,6 +255,7 @@ export class GameRoom {
       name: BOSS_NAMES[(bossNumber - 1) % BOSS_NAMES.length],
       isBot: true,
       isBoss: true,
+      enraged: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
       loadout: { front: 0, left: 2, right: 2 },
@@ -402,7 +413,14 @@ export class GameRoom {
     }
     const targetX = nearest ? nearest.body.x : bot.ai.patrolX;
     const targetZ = nearest ? nearest.body.z : bot.ai.patrolZ;
-    const { turn, throttle, wantsFire } = updateBotAI(bot.ai, bot.body, targetX, targetZ, nearest !== null);
+
+    if (bot.isBoss && !bot.enraged && bot.health <= bot.maxHealth * BOSS_ENRAGE_HEALTH_FRACTION) {
+      bot.enraged = true;
+      this.events.push({ type: 'message', text: `${bot.name} flies into a berserker rage!`, duration: 3500 });
+    }
+
+    const fireWindowDeg = bot.isBoss ? (bot.enraged ? BOSS_ENRAGED_FIRE_WINDOW_DEG : BOSS_FIRE_WINDOW_DEG) : undefined;
+    const { turn, throttle, wantsFire } = updateBotAI(bot.ai, bot.body, targetX, targetZ, nearest !== null, fireWindowDeg);
 
     applyControls(bot.body, bot.stats, turn, throttle, dt, false);
     const prevX = bot.body.x;
@@ -413,7 +431,8 @@ export class GameRoom {
     bot.cannonCooldown -= dt;
     if (bot.ai.state === 'attack' && bot.cannonCooldown <= 0 && wantsFire) {
       this.fireShip(bot);
-      bot.cannonCooldown = cannonReload(bot.stats) * 1.5;
+      const reloadMultiplier = bot.isBoss ? (bot.enraged ? BOSS_ENRAGED_RELOAD_MULT : BOSS_RELOAD_MULT) : 1.5;
+      bot.cannonCooldown = cannonReload(bot.stats) * reloadMultiplier;
     }
   }
 
@@ -559,6 +578,7 @@ export class GameRoom {
       name: `Hunter Tier ${tier + 1}`,
       isBot: true,
       isBoss: false,
+      enraged: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
       loadout: { front: 0, left: 1, right: 1 },

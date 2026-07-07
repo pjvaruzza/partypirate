@@ -55,9 +55,12 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   normal Tier-4's 180, 4 broadside cannons) with an escalating name/reward
   (1000, 1500, 2000g...) each time, rendered with a distinct black-hull/
   blood-red-sail look and 1.5x scale. Closes the original "quest chain
-  building toward a legendary boss ship" idea. Still open: bosses currently
-  only ever spawn from this trigger and are otherwise identical bot AI —
-  a unique boss-only attack pattern would make them feel less like a reskin.
+  building toward a legendary boss ship" idea. Bosses also fight
+  differently now: faster reload (0.8x vs. a normal bot's 1.5x) and a wider
+  broadside-alignment tolerance (55° vs. 35°) from the start, and a
+  one-time berserker "enrage" at 35% health (reload drops to 0.45x, window
+  widens to 75°) announced to the whole world — so they no longer feel like
+  a reskinned regular enemy.
 - [x] **Reputation/heat (M):** sinking a ship raises your "heat" (0-100,
   scaled off the gold reward — a boss kill nearly maxes it out in one hit),
   shown as an orange wanted-meter under the health bar. Heat decays slowly
@@ -125,9 +128,9 @@ this first cut:
 ---
 
 **Suggested next session's focus:** the world-builder loop is now quite full
-(upgrades → ship class → treasure hunts → escalating boss fights →
-risk/reward heat). Good next steps, roughly in order: (1) a unique boss
-attack pattern so legendary ships feel less like a reskin, (2) named rival
-captains (Tier 2) — the hunter-ship infrastructure from heat is most of
-what that needs already, (3) PvP with an opt-in toggle once the co-op
-progression loop feels rich enough to be worth defending from griefing.
+(upgrades → ship class → treasure hunts → escalating, distinct boss fights →
+risk/reward heat). Good next steps, roughly in order: (1) named rival
+captains (Tier 2) — the hunter-ship spawning + boss-style distinct-behavior
+infrastructure now covers most of what that needs, (2) PvP with an opt-in
+toggle once the co-op progression loop feels rich enough to be worth
+defending from griefing.

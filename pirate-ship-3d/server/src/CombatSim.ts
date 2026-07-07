@@ -111,7 +111,7 @@ function angleDiff(a: number, b: number): number {
 }
 
 const IDEAL_BROADSIDE_RANGE = 28;
-const BROADSIDE_FIRE_WINDOW = (35 * Math.PI) / 180;
+const DEFAULT_FIRE_WINDOW_DEG = 35;
 const DETECT_RANGE = 90;
 const ATTACK_RANGE = 45;
 
@@ -122,13 +122,16 @@ export interface BotAiResult {
 }
 
 /** Broadside-orbit AI, ported from Combat.ts's EnemyShip.update. Pass
- * `hasTarget: false` when no player is in the world so bots just patrol. */
+ * `hasTarget: false` when no player is in the world so bots just patrol.
+ * `fireWindowDeg` widens how far off pure-broadside a ship will still fire —
+ * bosses get a more forgiving window than regular bots (see GameRoom.ts). */
 export function updateBotAI(
   ai: BotAiState,
   body: { x: number; z: number; heading: number },
   targetX: number,
   targetZ: number,
   hasTarget: boolean,
+  fireWindowDeg: number = DEFAULT_FIRE_WINDOW_DEG,
 ): BotAiResult {
   const toTargetX = targetX - body.x;
   const toTargetZ = targetZ - body.z;
@@ -173,7 +176,8 @@ export function updateBotAI(
   if (ai.state === 'attack') {
     const bearingToTarget = Math.atan2(toTargetX, toTargetZ);
     const relBearing = Math.abs(angleDiff(bearingToTarget, body.heading));
-    wantsFire = Math.abs(relBearing - Math.PI / 2) < BROADSIDE_FIRE_WINDOW;
+    const fireWindow = (fireWindowDeg * Math.PI) / 180;
+    wantsFire = Math.abs(relBearing - Math.PI / 2) < fireWindow;
   }
 
   return { turn, throttle, wantsFire };
