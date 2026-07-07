@@ -58,9 +58,13 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   building toward a legendary boss ship" idea. Still open: bosses currently
   only ever spawn from this trigger and are otherwise identical bot AI —
   a unique boss-only attack pattern would make them feel less like a reskin.
-- **Reputation/heat (M):** sinking ships raises a "wanted level" that spawns
-  tougher hunter fleets the longer you stay out — a natural risk/reward timer
-  that pushes you back toward port (classic push-your-luck loop).
+- [x] **Reputation/heat (M):** sinking a ship raises your "heat" (0-100,
+  scaled off the gold reward — a boss kill nearly maxes it out in one hit),
+  shown as an orange wanted-meter under the health bar. Heat decays slowly
+  while at sea but drains fast once you're back near home port, and every
+  ~12s there's a chance (proportional to how hot you are) that a hunter ship
+  scaled to your heat level spawns nearby — the classic push-your-luck timer
+  pushing you back toward port. Session-only, not persisted across logins.
 - **Multiple ports / fast travel (M):** unlock a second and third shipyard
   further from spawn, eventually with fast travel between them.
 - **Cosmetics (S/M):** flag design, hull paint colors, sail patterns — cheap
@@ -120,10 +124,10 @@ this first cut:
 
 ---
 
-**Suggested next session's focus:** the world-builder loop now has a full
-progression arc (upgrades → ship class → treasure hunts → escalating boss
-fights). Good next steps, roughly in order: (1) reputation/heat, since it
-plays well against the bigger world exploration already encourages,
-(2) a unique boss attack pattern so legendary ships feel less like a reskin,
-(3) PvP with an opt-in toggle once the co-op progression loop feels rich
-enough to be worth defending from griefing.
+**Suggested next session's focus:** the world-builder loop is now quite full
+(upgrades → ship class → treasure hunts → escalating boss fights →
+risk/reward heat). Good next steps, roughly in order: (1) a unique boss
+attack pattern so legendary ships feel less like a reskin, (2) named rival
+captains (Tier 2) — the hunter-ship infrastructure from heat is most of
+what that needs already, (3) PvP with an opt-in toggle once the co-op
+progression loop feels rich enough to be worth defending from griefing.

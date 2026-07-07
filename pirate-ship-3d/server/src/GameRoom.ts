@@ -48,6 +48,14 @@ const TREASURE_REWARD_CAP = 600;
 const BOSS_INTERVAL = 5;
 const BOSS_NAMES = ["The Kraken's Bane", "Widow's Reckoning", 'The Crimson Leviathan', 'Ghost of the Abyss'];
 
+const HEAT_MAX = 100;
+const HEAT_PER_GOLD_EARNED = 0.15;
+const HEAT_DECAY_PER_SEC = 1.2;
+const HEAT_DECAY_PER_SEC_AT_PORT = 20;
+const HOME_PORT_HEAT_RADIUS_EXTRA = 15;
+const HUNTER_CHECK_INTERVAL = 12;
+const HUNTER_SPAWN_CHANCE_AT_MAX_HEAT = 0.5;
+
 const BASE_COST: Record<UpgradeKey, number> = { sails: 40, cannons: 50, hull: 45, powder: 60 };
 const COST_GROWTH = 1.55;
 
@@ -94,6 +102,9 @@ export interface PlayerShip extends BaseShip {
    * for RECONNECT_GRACE_MS so the same captain name can reclaim it instead
    * of respawning fresh at port. */
   disconnectedAt: number | null;
+  /** 0-100 "wanted level" — session-only, not persisted. See updateHeat. */
+  heat: number;
+  hunterCheckTimer: number;
 }
 
 export interface BotShip extends BaseShip {
@@ -144,6 +155,8 @@ export class GameRoom {
       boostTimer: 0,
       boostRechargeTimer: 0,
       disconnectedAt: null,
+      heat: 0,
+      hunterCheckTimer: 0,
     };
     this.ships.set(id, ship);
     return ship;
@@ -324,6 +337,7 @@ export class GameRoom {
       nextClassCost: nextClass ? SHIP_CLASS_CONFIG[nextClass].cost : null,
       treasureHuntsCompleted: ship.economy.treasureHuntsCompleted,
       treasureHunt: ship.economy.treasureHunt,
+      heat: ship.heat,
     };
   }
 
@@ -444,6 +458,7 @@ export class GameRoom {
             const killer = this.ships.get(ball.ownerId);
             if (killer && !killer.isBot) {
               killer.economy.gold += ship.goldReward;
+              killer.heat = Math.min(HEAT_MAX, killer.heat + ship.goldReward * HEAT_PER_GOLD_EARNED);
               this.events.push({ type: 'gold', amount: ship.goldReward, for: killer.id });
               this.events.push({
                 type: 'message',
@@ -523,6 +538,60 @@ export class GameRoom {
     }
   }
 
+  private isNearHomePort(x: number, z: number): boolean {
+    const home = this.islands.find((isl) => isl.isHomePort);
+    if (!home) return false;
+    return Math.hypot(x - home.x, z - home.z) < home.radius + HOME_PORT_HEAT_RADIUS_EXTRA;
+  }
+
+  /** A tougher bot sent after a specific player once their heat runs high —
+   * the "the longer you stay out, the worse it gets" push-your-luck timer. */
+  private spawnHunterShip(target: PlayerShip) {
+    const tier = Math.min(4, Math.max(1, Math.floor(target.heat / 25)));
+    const stats: ShipStats = { sailLevel: tier, cannonLevel: tier, hullLevel: tier };
+    const id = randomUUID();
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 70 + Math.random() * 30;
+    const x = target.body.x + Math.cos(angle) * dist;
+    const z = target.body.z + Math.sin(angle) * dist;
+    const hunter: BotShip = {
+      id,
+      name: `Hunter Tier ${tier + 1}`,
+      isBot: true,
+      isBoss: false,
+      body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
+      stats,
+      loadout: { front: 0, left: 1, right: 1 },
+      health: maxHealthFor(stats),
+      maxHealth: maxHealthFor(stats),
+      cannonCooldown: 0,
+      alive: true,
+      deathTimer: 0,
+      ai: { state: 'patrol', patrolX: x, patrolZ: z },
+      goldReward: 30 + tier * 25,
+    };
+    this.ships.set(id, hunter);
+    this.events.push({ type: 'message', text: 'A hunter ship has picked up your trail!', duration: 3000, for: target.id });
+  }
+
+  /** Heat rises on kills (see resolveCombat), decays over time — fast near
+   * home port, so making port is the natural way to "cool off" — and
+   * periodically has a chance to summon a hunter ship while it's high. */
+  private updateHeat(dt: number) {
+    for (const ship of this.ships.values()) {
+      if (ship.isBot || !ship.alive) continue;
+      const decay = this.isNearHomePort(ship.body.x, ship.body.z) ? HEAT_DECAY_PER_SEC_AT_PORT : HEAT_DECAY_PER_SEC;
+      ship.heat = Math.max(0, ship.heat - decay * dt);
+
+      ship.hunterCheckTimer += dt;
+      if (ship.hunterCheckTimer < HUNTER_CHECK_INTERVAL) continue;
+      ship.hunterCheckTimer = 0;
+      if (ship.heat > 0 && Math.random() < (ship.heat / HEAT_MAX) * HUNTER_SPAWN_CHANCE_AT_MAX_HEAT) {
+        this.spawnHunterShip(ship);
+      }
+    }
+  }
+
   /** Call after broadcasting a tick's events — not at the start of tick()
    * itself, since chat messages arrive asynchronously between ticks via the
    * WebSocket handler and would otherwise get wiped by the next tick before
@@ -562,5 +631,6 @@ export class GameRoom {
     this.resolveCombat();
     this.updateCrates();
     this.updateTreasureHunts();
+    this.updateHeat(dt);
   }
 }

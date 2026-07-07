@@ -125,6 +125,10 @@ export interface EconomySnapshot {
   /** The dig site for this player's active treasure map, if any — only ever
    * sent to the player who owns it. */
   treasureHunt: { x: number; z: number } | null;
+  /** 0-100 "wanted level" — rises on kills, decays over time (fast near
+   * home port), and periodically summons a hunter ship when high. Session
+   * state, not persisted across reconnects/logouts. */
+  heat: number;
 }
 
 export interface WelcomeMessage {

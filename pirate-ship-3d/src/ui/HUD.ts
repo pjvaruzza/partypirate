@@ -9,6 +9,8 @@ const CLASS_NAMES: Record<ShipClass, string> = { sloop: 'Sloop', brigantine: 'Br
  * next snapshot to reflect the result, rather than mutating local state. */
 export class HUD {
   private healthFill = document.getElementById('health-fill') as HTMLDivElement;
+  private heatBar = document.getElementById('heat-bar') as HTMLDivElement;
+  private heatFill = document.getElementById('heat-fill') as HTMLDivElement;
   private goldAmount = document.getElementById('gold-amount') as HTMLSpanElement;
   private banner = document.getElementById('message-banner') as HTMLDivElement;
   private shipyard = document.getElementById('shipyard') as HTMLDivElement;
@@ -50,6 +52,11 @@ export class HUD {
     this.goldAmount.textContent = String(Math.floor(amount));
   }
 
+  setHeat(heat: number) {
+    this.heatBar.classList.toggle('hidden', heat <= 0);
+    this.heatFill.style.width = `${Math.max(0, Math.min(100, heat))}%`;
+  }
+
   showMessage(text: string, duration = 2200) {
     this.banner.textContent = text;
     this.banner.classList.add('show');
@@ -74,6 +81,7 @@ export class HUD {
   updateEconomy(economy: EconomySnapshot) {
     this.latestEconomy = economy;
     this.setGold(economy.gold);
+    this.setHeat(economy.heat);
     if (this.isShipyardOpen()) this.renderShipyard(economy);
   }
 

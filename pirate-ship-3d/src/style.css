@@ -60,6 +60,26 @@ body {
   transition: width 0.2s ease;
 }
 
+#heat-bar {
+  width: 200px;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 120, 40, 0.6);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+#heat-bar.hidden {
+  display: none;
+}
+
+#heat-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #ff8c1a, #ff2f2f);
+  transition: width 0.3s ease;
+}
+
 #gold-counter {
   font-size: 20px;
   font-weight: 700;
