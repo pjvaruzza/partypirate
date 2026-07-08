@@ -55,6 +55,26 @@ const BOSS_RELOAD_MULT = 0.8;
 const BOSS_ENRAGED_RELOAD_MULT = 0.45;
 const BOSS_ENRAGE_HEALTH_FRACTION = 0.35;
 
+/** Occasional unique mini-boss encounters — distinct from the treasure-hunt
+ * boss chain, these roam the world ambiently and are meaningfully tougher/
+ * faster than a same-tier regular bot, with a name and signature look. */
+const RIVAL_CHECK_INTERVAL = 45;
+const RIVAL_SPAWN_CHANCE = 0.35;
+const MAX_ACTIVE_RIVALS = 2;
+const RIVAL_NAMES = [
+  'Calico Jack Rackham',
+  'One-Eyed Beatrix',
+  'Blackscar Morrow',
+  'Iron Hand Ilse',
+  'Mad Dog McCready',
+  'Silver-Tongued Solari',
+];
+const RIVAL_HEALTH_MULT = 1.6;
+const RIVAL_RELOAD_MULT = 0.85;
+const RIVAL_FIRE_WINDOW_DEG = 48;
+const RIVAL_GOLD_MULT = 3;
+const RIVAL_SAIL_BONUS = 1.5;
+
 const HEAT_MAX = 100;
 const HEAT_PER_GOLD_EARNED = 0.15;
 const HEAT_DECAY_PER_SEC = 1.2;
@@ -117,6 +137,9 @@ export interface PlayerShip extends BaseShip {
 export interface BotShip extends BaseShip {
   isBot: true;
   isBoss: boolean;
+  /** A named rival captain — see RIVAL_NAMES / spawnRivalCaptain. Mutually
+   * exclusive with isBoss. */
+  isRival: boolean;
   /** One-way flip when a boss drops below BOSS_ENRAGE_HEALTH_FRACTION — see updateBot. */
   enraged: boolean;
   ai: BotAiState;
@@ -134,6 +157,7 @@ export class GameRoom {
   events: GameEvent[] = [];
 
   private enemySpawnTimer = 0;
+  private rivalSpawnTimer = 0;
 
   constructor(worldRadius = 900, islandCount = 12) {
     this.worldRadius = worldRadius;
@@ -221,6 +245,7 @@ export class GameRoom {
       name: `Enemy Tier ${tier + 1}`,
       isBot: true,
       isBoss: false,
+      isRival: false,
       enraged: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
@@ -255,6 +280,7 @@ export class GameRoom {
       name: BOSS_NAMES[(bossNumber - 1) % BOSS_NAMES.length],
       isBot: true,
       isBoss: true,
+      isRival: false,
       enraged: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
@@ -273,6 +299,52 @@ export class GameRoom {
       text: `${boss.name} has appeared nearby! Sink it for a legendary reward.`,
       duration: 4000,
       for: targetPlayerId,
+    });
+  }
+
+  /** An occasional, named mini-boss that roams the world ambiently — see
+   * RIVAL_* constants above and the periodic check in tick(). Distinct from
+   * spawnBossShip: not tied to treasure hunts, no enrage phase, but a
+   * meaningful step up from a same-tier regular bot in health/reload/reward. */
+  private spawnRivalCaptain() {
+    const activeNames = new Set(
+      [...this.ships.values()].filter((s): s is BotShip => s.isBot && s.isRival).map((s) => s.name),
+    );
+    const available = RIVAL_NAMES.filter((n) => !activeNames.has(n));
+    if (available.length === 0) return;
+    const name = available[Math.floor(Math.random() * available.length)];
+
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 120 + Math.random() * (this.worldRadius - 150);
+    const tier = Math.min(4, Math.floor(dist / 220));
+    const stats: ShipStats = { sailLevel: tier + RIVAL_SAIL_BONUS, cannonLevel: tier, hullLevel: tier };
+    const id = randomUUID();
+    const x = Math.cos(angle) * dist;
+    const z = Math.sin(angle) * dist;
+    const baseHealth = maxHealthFor(stats);
+    const rival: BotShip = {
+      id,
+      name,
+      isBot: true,
+      isBoss: false,
+      isRival: true,
+      enraged: false,
+      body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
+      stats,
+      loadout: { front: 0, left: 2, right: 2 },
+      health: baseHealth * RIVAL_HEALTH_MULT,
+      maxHealth: baseHealth * RIVAL_HEALTH_MULT,
+      cannonCooldown: 0,
+      alive: true,
+      deathTimer: 0,
+      ai: { state: 'patrol', patrolX: x, patrolZ: z },
+      goldReward: Math.round((25 + tier * 20) * RIVAL_GOLD_MULT),
+    };
+    this.ships.set(id, rival);
+    this.events.push({
+      type: 'message',
+      text: `Rival captain ${name} has been sighted on the horizon!`,
+      duration: 4000,
     });
   }
 
@@ -419,7 +491,13 @@ export class GameRoom {
       this.events.push({ type: 'message', text: `${bot.name} flies into a berserker rage!`, duration: 3500 });
     }
 
-    const fireWindowDeg = bot.isBoss ? (bot.enraged ? BOSS_ENRAGED_FIRE_WINDOW_DEG : BOSS_FIRE_WINDOW_DEG) : undefined;
+    const fireWindowDeg = bot.isBoss
+      ? bot.enraged
+        ? BOSS_ENRAGED_FIRE_WINDOW_DEG
+        : BOSS_FIRE_WINDOW_DEG
+      : bot.isRival
+        ? RIVAL_FIRE_WINDOW_DEG
+        : undefined;
     const { turn, throttle, wantsFire } = updateBotAI(bot.ai, bot.body, targetX, targetZ, nearest !== null, fireWindowDeg);
 
     applyControls(bot.body, bot.stats, turn, throttle, dt, false);
@@ -431,7 +509,13 @@ export class GameRoom {
     bot.cannonCooldown -= dt;
     if (bot.ai.state === 'attack' && bot.cannonCooldown <= 0 && wantsFire) {
       this.fireShip(bot);
-      const reloadMultiplier = bot.isBoss ? (bot.enraged ? BOSS_ENRAGED_RELOAD_MULT : BOSS_RELOAD_MULT) : 1.5;
+      const reloadMultiplier = bot.isBoss
+        ? bot.enraged
+          ? BOSS_ENRAGED_RELOAD_MULT
+          : BOSS_RELOAD_MULT
+        : bot.isRival
+          ? RIVAL_RELOAD_MULT
+          : 1.5;
       bot.cannonCooldown = cannonReload(bot.stats) * reloadMultiplier;
     }
   }
@@ -483,11 +567,20 @@ export class GameRoom {
                 type: 'message',
                 text: ship.isBoss
                   ? `${ship.name} defeated! +${ship.goldReward} gold — a legendary victory!`
-                  : `Enemy sunk! +${ship.goldReward} gold`,
-                duration: ship.isBoss ? 4000 : undefined,
+                  : ship.isRival
+                    ? `You defeated rival captain ${ship.name}! +${ship.goldReward} gold`
+                    : `Enemy sunk! +${ship.goldReward} gold`,
+                duration: ship.isBoss || ship.isRival ? 4000 : undefined,
                 for: killer.id,
               });
-              if (!ship.isBoss && !killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
+              if (ship.isRival) {
+                this.events.push({
+                  type: 'message',
+                  text: `Captain ${killer.name} has defeated the rival captain ${ship.name}!`,
+                  duration: 3500,
+                });
+              }
+              if (!ship.isBoss && !ship.isRival && !killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
                 killer.economy.treasureHunt = this.pickTreasureSite();
                 this.events.push({
                   type: 'message',
@@ -578,6 +671,7 @@ export class GameRoom {
       name: `Hunter Tier ${tier + 1}`,
       isBot: true,
       isBoss: false,
+      isRival: false,
       enraged: false,
       body: { x, z, heading: Math.random() * Math.PI * 2, speed: 0 },
       stats,
@@ -625,6 +719,15 @@ export class GameRoom {
     if (this.enemySpawnTimer > ENEMY_SPAWN_INTERVAL) {
       this.enemySpawnTimer = 0;
       this.spawnBotWave();
+    }
+
+    this.rivalSpawnTimer += dt;
+    if (this.rivalSpawnTimer > RIVAL_CHECK_INTERVAL) {
+      this.rivalSpawnTimer = 0;
+      const activeRivals = [...this.ships.values()].filter((s) => s.isBot && s.isRival).length;
+      if (activeRivals < MAX_ACTIVE_RIVALS && Math.random() < RIVAL_SPAWN_CHANCE) {
+        this.spawnRivalCaptain();
+      }
     }
 
     const now = Date.now();

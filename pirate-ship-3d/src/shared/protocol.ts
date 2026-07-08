@@ -88,6 +88,9 @@ export interface ShipSnapshot {
   /** A rare, tougher bot spawned as the payoff of a treasure-hunt chain —
    * always false for players. */
   isBoss: boolean;
+  /** A named rival captain — an occasional, tougher/faster ambient encounter
+   * distinct from the treasure-hunt boss chain. Always false for players. */
+  isRival: boolean;
   shipClass: ShipClass;
   x: number;
   z: number;

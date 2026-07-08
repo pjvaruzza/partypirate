@@ -32,9 +32,15 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   cannons per side."
 - **Ramming (S):** colliding into an enemy at speed damages both ships,
   rewards aggressive close-range play as an alternative to broadsides.
-- **Named rival captains (M):** occasional unique mini-boss enemy ships with
-  a name, distinct color/flag, and a special behavior (faster, tankier, or a
-  signature attack) — memorable encounters instead of anonymous reskins.
+- [x] **Named rival captains (M):** the world now periodically (every ~45s,
+  35% chance, up to 2 at once) spawns a named mini-boss — six unique captains
+  (Calico Jack Rackham, One-Eyed Beatrix, etc.) each with a deterministic,
+  distinct hull/sail color. Tougher than a same-tier regular bot (1.6x
+  health), reloads faster (0.85x) with a wider broadside-fire tolerance
+  (48°), and pays 3x the gold. Sighting and defeat are both announced
+  world-wide (not just to the player who lands the kill), unlike the
+  quest-chain boss which only messages the hunter. No enrage phase — that
+  stays the treasure-chain boss's signature.
 - **Boarding (L):** at low enemy health, option to board instead of sink —
   higher risk/reward loot, maybe a quick-time or mini-minigame.
 
@@ -77,8 +83,12 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
 
 - **Onboarding (S):** a short first-run tutorial overlay explaining controls
   and the cannon builder instead of dropping the player in cold.
-- **Minimap/compass (S/M):** show nearby islands, the home port direction,
-  and threat blips — helps orientation once the world feels bigger.
+- [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
+  (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
+  other ships as color-coded blips (blue players, red bots, brighter
+  orange/red for rivals and bosses), and your own heading as a center
+  triangle that doubles as a compass. When home port is out of the shown
+  ~240-unit range, an edge arrow points toward it.
 - **Better art pass (M/L):** replace procedural low-poly meshes with real
   (or nicer procedural) ship/island models, a day-night cycle, better water
   shading (foam trails behind the ship, reflections).
@@ -129,8 +139,10 @@ this first cut:
 
 **Suggested next session's focus:** the world-builder loop is now quite full
 (upgrades → ship class → treasure hunts → escalating, distinct boss fights →
-risk/reward heat). Good next steps, roughly in order: (1) named rival
-captains (Tier 2) — the hunter-ship spawning + boss-style distinct-behavior
-infrastructure now covers most of what that needs, (2) PvP with an opt-in
-toggle once the co-op progression loop feels rich enough to be worth
-defending from griefing.
+risk/reward heat → named rival captains → minimap orientation). Good next
+steps, roughly in order: (1) onboarding tutorial — several systems now exist
+with no in-game explanation, (2) PvP with an opt-in toggle once ready to
+defend the co-op loop from griefing, (3) mobile hosting/testing pass (tunnel
+for quick testing, or real `wss://` hosting for anything durable) — the
+touch controls exist but the newer UI has never been checked on a real
+mobile viewport.

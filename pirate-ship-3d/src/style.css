@@ -113,6 +113,17 @@ body {
   padding: 0;
 }
 
+#minimap {
+  position: absolute;
+  top: 62px;
+  right: 16px;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
+}
+
 #message-banner {
   position: absolute;
   top: 70px;

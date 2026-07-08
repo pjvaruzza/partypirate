@@ -9,6 +9,7 @@ import { Effects } from './game/Effects';
 import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
 import { Chat } from './ui/Chat';
+import { Minimap } from './ui/Minimap';
 import { Network } from './net/Network';
 import { SHIP_CLASS_SCALE, type CrateInfo, type GameEvent, type ShipSnapshot } from './shared/protocol';
 
@@ -103,6 +104,7 @@ muteBtn?.addEventListener('click', () => {
 // --- HUD / chat / network ----------------------------------------------------
 const hud = new HUD();
 const chat = new Chat();
+const minimap = new Minimap();
 const network = new Network();
 chat.onSend = (text) => network.sendChat(text);
 
@@ -111,8 +113,29 @@ const renderedShipClass = new Map<string, ShipSnapshot['shipClass']>();
 const renderedCrates = new Map<string, THREE.Mesh>();
 const treasureMarker = new TreasureMarker(scene);
 
+/** Distinct hull/sail palette for named rival captains — picked deterministically
+ * from the name so the same captain always looks the same across sightings. */
+const RIVAL_COLORS = [
+  { hull: 0x2b1a3a, sail: 0x8a3fd6 },
+  { hull: 0x1a2f3a, sail: 0x3fb8d6 },
+  { hull: 0x3a2a1a, sail: 0xd68a3f },
+  { hull: 0x1a3a22, sail: 0x3fd66b },
+  { hull: 0x3a1a1a, sail: 0xd63f5a },
+  { hull: 0x2a2a2a, sail: 0xd6d63f },
+];
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
   if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5 };
+  if (ship.isRival) {
+    const c = RIVAL_COLORS[hashString(ship.name) % RIVAL_COLORS.length];
+    return { hullColor: c.hull, sailColor: c.sail, scale: 1.2 };
+  }
   if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
   const scale = SHIP_CLASS_SCALE[ship.shipClass];
   if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xf2ead6, scale };
@@ -330,6 +353,17 @@ function animate() {
       scene.remove(ship.group);
       renderedShips.delete(id);
       renderedShipClass.delete(id);
+    }
+
+    if (mine) {
+      minimap.render(
+        mine.x,
+        mine.z,
+        mine.heading,
+        world.islands.map((isl) => ({ x: isl.position.x, z: isl.position.z, radius: isl.radius, isHomePort: isl.isHomePort })),
+        snapshot,
+        network.yourId,
+      );
     }
   }
 
