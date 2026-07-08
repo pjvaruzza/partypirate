@@ -37,6 +37,14 @@ export class Chat {
         this.open();
       }
     });
+
+    // Enter isn't reachable on a touchscreen — a visible toggle button is the
+    // only way mobile players can open chat at all.
+    const toggleBtn = document.getElementById('chat-toggle-btn');
+    toggleBtn?.addEventListener('click', () => {
+      if (this.isOpen()) this.close();
+      else this.open();
+    });
   }
 
   isOpen(): boolean {

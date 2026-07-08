@@ -103,7 +103,8 @@ body {
   border-radius: 8px;
 }
 
-#mute-btn {
+#mute-btn,
+#chat-toggle-btn {
   pointer-events: auto;
   border: none;
   background: transparent;
@@ -325,13 +326,13 @@ body {
 }
 
 .slot-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
   border: none;
   background: #3a5a78;
   color: #fff;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   cursor: pointer;
   line-height: 1;
