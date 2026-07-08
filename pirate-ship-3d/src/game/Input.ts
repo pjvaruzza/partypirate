@@ -63,7 +63,8 @@ export class InputManager {
       const cx = Math.cos(angle) * dist;
       const cy = Math.sin(angle) * dist;
       knob.style.transform = `translate(calc(-50% + ${cx}px), calc(-50% + ${cy}px))`;
-      this.state.turn = Math.max(-1, Math.min(1, cx / maxDist));
+      // Negated for the same screen-vs-heading mirroring as the keyboard turn above.
+      this.state.turn = Math.max(-1, Math.min(1, -cx / maxDist));
       this.state.throttle = Math.max(-1, Math.min(1, -cy / maxDist));
     };
 
@@ -112,8 +113,12 @@ export class InputManager {
     if (!this.joystickActive) {
       let turn = 0;
       let throttle = 0;
-      if (this.keys.has('a') || this.keys.has('arrowleft')) turn -= 1;
-      if (this.keys.has('d') || this.keys.has('arrowright')) turn += 1;
+      // The chase camera trails behind the ship looking the same direction it
+      // faces, which mirrors screen left/right relative to the heading math
+      // below (see the same note on cannonMountOffsets in Ship.ts) — so the
+      // key-to-turn sign has to be flipped to match what's on screen.
+      if (this.keys.has('a') || this.keys.has('arrowleft')) turn += 1;
+      if (this.keys.has('d') || this.keys.has('arrowright')) turn -= 1;
       if (this.keys.has('w') || this.keys.has('arrowup')) throttle += 1;
       if (this.keys.has('s') || this.keys.has('arrowdown')) throttle -= 1;
       this.state.turn = turn;

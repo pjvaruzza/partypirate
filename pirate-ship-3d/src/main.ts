@@ -11,7 +11,7 @@ import { HUD } from './ui/HUD';
 import { Chat } from './ui/Chat';
 import { Minimap } from './ui/Minimap';
 import { Network } from './net/Network';
-import { SHIP_CLASS_SCALE, type CrateInfo, type GameEvent, type ShipSnapshot } from './shared/protocol';
+import { SHIP_CLASS_SCALE, type CannonballSnapshot, type CrateInfo, type GameEvent, type ShipSnapshot } from './shared/protocol';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const portBtn = document.getElementById('port-btn') as HTMLButtonElement;
@@ -113,6 +113,79 @@ const renderedShipClass = new Map<string, ShipSnapshot['shipClass']>();
 const renderedCrates = new Map<string, THREE.Mesh>();
 const treasureMarker = new TreasureMarker(scene);
 
+/** The server tracks cannonball flight authoritatively but previously never
+ * got a visual — players only saw the muzzle flash and, moments later, the
+ * splash/hit effect, with nothing in between showing where the shot went. */
+interface CannonballVisual {
+  group: THREE.Group;
+  trail: THREE.Mesh;
+  prevPos: THREE.Vector3;
+}
+const renderedCannonballs = new Map<string, CannonballVisual>();
+
+function buildCannonballVisual(): CannonballVisual {
+  const group = new THREE.Group();
+
+  const ballGeo = new THREE.SphereGeometry(0.26, 10, 8);
+  const ballMat = new THREE.MeshStandardMaterial({
+    color: 0x1c1c1c,
+    roughness: 0.35,
+    metalness: 0.7,
+    emissive: 0x3a1400,
+    emissiveIntensity: 0.9,
+  });
+  const ball = new THREE.Mesh(ballGeo, ballMat);
+  ball.castShadow = true;
+  group.add(ball);
+
+  // A short glowing streak behind the ball so its flight path reads clearly
+  // even at 26 units/sec — oriented and scaled to its motion each frame.
+  const trailGeo = new THREE.CylinderGeometry(0.05, 0.16, 1, 6, 1, true);
+  const trailMat = new THREE.MeshBasicMaterial({
+    color: 0xffb347,
+    transparent: true,
+    opacity: 0.5,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const trail = new THREE.Mesh(trailGeo, trailMat);
+  trail.visible = false;
+  group.add(trail);
+
+  return { group, trail, prevPos: new THREE.Vector3() };
+}
+
+function syncCannonballs(balls: CannonballSnapshot[]) {
+  const seen = new Set<string>();
+  for (const ball of balls) {
+    seen.add(ball.id);
+    const curPos = new THREE.Vector3(ball.x, ball.y, ball.z);
+    let vis = renderedCannonballs.get(ball.id);
+    if (!vis) {
+      vis = buildCannonballVisual();
+      vis.prevPos.copy(curPos);
+      scene.add(vis.group);
+      renderedCannonballs.set(ball.id, vis);
+    }
+    vis.group.position.copy(curPos);
+
+    const delta = new THREE.Vector3().subVectors(curPos, vis.prevPos);
+    const len = delta.length();
+    if (len > 0.001) {
+      vis.trail.visible = true;
+      vis.trail.scale.set(1, Math.min(2.5, len * 3), 1);
+      vis.trail.position.copy(delta).multiplyScalar(-0.5);
+      vis.trail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.clone().normalize());
+    }
+    vis.prevPos.copy(curPos);
+  }
+  for (const [id, vis] of renderedCannonballs) {
+    if (seen.has(id)) continue;
+    scene.remove(vis.group);
+    renderedCannonballs.delete(id);
+  }
+}
+
 /** Distinct hull/sail palette for named rival captains — picked deterministically
  * from the name so the same captain always looks the same across sightings. */
 const RIVAL_COLORS = [
@@ -169,6 +242,8 @@ function clearWorldState() {
   renderedShipClass.clear();
   for (const mesh of renderedCrates.values()) scene.remove(mesh);
   renderedCrates.clear();
+  for (const vis of renderedCannonballs.values()) scene.remove(vis.group);
+  renderedCannonballs.clear();
   treasureMarker.setTarget(null);
   world = null;
 }
@@ -306,6 +381,8 @@ function animate() {
 
     const snapshot = network.getRenderShips();
     const seenIds = new Set<string>();
+
+    syncCannonballs(network.getRenderCannonballs());
 
     for (const cur of snapshot) {
       seenIds.add(cur.id);
