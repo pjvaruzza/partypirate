@@ -33,9 +33,9 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   under the hit sound for punch, and a bigger three-part kill explosion
   (debris + embers + a bright core flash). The `hit` event now carries
   `ownerId`/`damage` so the client can tell "you dealt this" from "you took
-  this." Still open: repetitive combat (only one tactic — broadside orbit)
-  and the "visuals look cheap" complaint (procedural low-poly models) —
-  next up per the user, roughly in that order.
+  this." Still open: the "visuals look cheap" complaint (procedural
+  low-poly models) — biggest remaining lift, deferred since it has real
+  diminishing returns without actual art assets.
 
 ## Tier 2 — Combat depth & variety
 
@@ -43,8 +43,20 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   grapeshot (extra damage vs. crew/hull at close range), fire shot (ignites
   sails, damage over time) — gives loadout choices beyond just "how many
   cannons per side."
-- **Ramming (S):** colliding into an enemy at speed damages both ships,
-  rewards aggressive close-range play as an alternative to broadsides.
+- [x] **Ramming (S):** driving your hull into a bot at speed (≥3.5 units/s
+  relative closing speed) damages both sides, scaled by that closing speed
+  (capped at 45) — reuses the same damage-number/hit-stop/shake feedback as
+  cannon hits, plus a distinct, heavier wood-crunch effect and sound. Pushes
+  both ships apart and bleeds their speed on contact so they don't stay
+  glued together, with a 1.2s per-ship cooldown so one collision doesn't
+  melt a target across several ticks. Ram kills pay out the same gold/heat/
+  treasure-map rewards as a cannon kill (`killShip()` in `GameRoom.ts`,
+  factored out of `resolveCombat` so both paths share it). Player-vs-bot
+  only, matching the no-PvP design. Worth knowing: a bot that's already
+  spotted you holds its broadside-orbit range (~28 units), so landing a ram
+  on an alert enemy means actively cutting inside its turn — it lands much
+  more easily on a patrolling/unaware bot, which feels intentional (a
+  skill-rewarding alternative to cannons) rather than a bug.
 - [x] **Named rival captains (M):** the world now periodically (every ~45s,
   35% chance, up to 2 at once) spawns a named mini-boss — six unique captains
   (Calico Jack Rackham, One-Eyed Beatrix, etc.) each with a deterministic,
@@ -150,12 +162,13 @@ this first cut:
 
 ---
 
-**Suggested next session's focus:** the world-builder loop is now quite full
-(upgrades → ship class → treasure hunts → escalating, distinct boss fights →
-risk/reward heat → named rival captains → minimap orientation). Good next
-steps, roughly in order: (1) onboarding tutorial — several systems now exist
-with no in-game explanation, (2) PvP with an opt-in toggle once ready to
-defend the co-op loop from griefing, (3) mobile hosting/testing pass (tunnel
-for quick testing, or real `wss://` hosting for anything durable) — the
-touch controls exist but the newer UI has never been checked on a real
-mobile viewport.
+**Suggested next session's focus:** a user pass flagged gameplay quality
+directly — combat impact/weight and repetitiveness are now addressed (hit
+feedback pass + ramming); the "visuals look cheap" complaint is the one
+still open from that pass, and is the biggest lift (procedural low-poly
+models, flat lighting/water). Otherwise, roughly in order: (1) onboarding
+tutorial — several systems now exist with no in-game explanation, (2) PvP
+with an opt-in toggle once ready to defend the co-op loop from griefing,
+(3) mobile hosting/testing pass (tunnel for quick testing, or real `wss://`
+hosting for anything durable) — the touch controls exist but the newer UI
+has never been checked on a real mobile viewport.

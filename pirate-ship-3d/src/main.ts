@@ -358,6 +358,9 @@ function handleEvents(events: GameEvent[]) {
       } else if (dealt) {
         triggerShake(0.15, 0.18);
       }
+    } else if (ev.type === 'ram') {
+      effects.hullCrunch(new THREE.Vector3(ev.x, ev.y, ev.z));
+      sound.ramImpact();
     } else if (ev.type === 'sunk') {
       effects.sinkExplosion(new THREE.Vector3(ev.x, 0, ev.z));
       sound.sink();

@@ -156,6 +156,7 @@ export type GameEvent =
   | { type: 'splash'; x: number; y: number; z: number }
   | { type: 'hit'; x: number; y: number; z: number; targetId: string; ownerId: string; damage: number }
   | { type: 'sunk'; shipId: string; x: number; z: number }
+  | { type: 'ram'; x: number; y: number; z: number }
   | { type: 'gold'; amount: number; for: string }
   | { type: 'message'; text: string; duration?: number; for?: string }
   | { type: 'chat'; name: string; text: string };

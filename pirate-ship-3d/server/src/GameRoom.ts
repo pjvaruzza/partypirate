@@ -36,6 +36,16 @@ const BOT_DESPAWN_DELAY = 2.5;
 const BOOST_DURATION = 4;
 const BOOST_RECHARGE_TIME = 12;
 const HIT_RADIUS = 3;
+/** Ramming: driving your hull into a bot at speed damages both sides —
+ * rewards aggressive close-range play as an alternative to broadsides.
+ * Tighter than HIT_RADIUS (which is deliberately forgiving for cannon aim)
+ * since this is meant to read as literal hull contact. */
+const RAM_CONTACT_RADIUS = 1.6;
+const RAM_MIN_SPEED = 3.5;
+const RAM_DAMAGE_PER_SPEED = 2.6;
+const RAM_MAX_DAMAGE = 45;
+const RAM_COOLDOWN = 1.2;
+const RAM_KNOCKBACK_SPEED_MULT = 0.3;
 const CRATE_RADIUS = 3.2;
 const RECONNECT_GRACE_MS = 60_000;
 const CHAT_MAX_LENGTH = 140;
@@ -115,6 +125,9 @@ interface BaseShip {
   cannonCooldown: number;
   alive: boolean;
   deathTimer: number;
+  /** Prevents ram damage from re-triggering every tick while two hulls stay
+   * in contact — see resolveRamming. */
+  ramCooldown: number;
 }
 
 export interface PlayerShip extends BaseShip {
@@ -179,6 +192,7 @@ export class GameRoom {
       health: maxHealthFor(stats),
       maxHealth: maxHealthFor(stats),
       cannonCooldown: 0,
+      ramCooldown: 0,
       alive: true,
       deathTimer: 0,
       socket,
@@ -253,6 +267,7 @@ export class GameRoom {
       health: maxHealthFor(stats),
       maxHealth: maxHealthFor(stats),
       cannonCooldown: 0,
+      ramCooldown: 0,
       alive: true,
       deathTimer: 0,
       ai: {
@@ -288,6 +303,7 @@ export class GameRoom {
       health: maxHealthFor(stats) * 1.8,
       maxHealth: maxHealthFor(stats) * 1.8,
       cannonCooldown: 0,
+      ramCooldown: 0,
       alive: true,
       deathTimer: 0,
       ai: { state: 'patrol', patrolX: x, patrolZ: z },
@@ -335,6 +351,7 @@ export class GameRoom {
       health: baseHealth * RIVAL_HEALTH_MULT,
       maxHealth: baseHealth * RIVAL_HEALTH_MULT,
       cannonCooldown: 0,
+      ramCooldown: 0,
       alive: true,
       deathTimer: 0,
       ai: { state: 'patrol', patrolX: x, patrolZ: z },
@@ -541,6 +558,52 @@ export class GameRoom {
     }
   }
 
+  /** Marks `ship` as sunk and, if it was a bot, pays out gold/heat/treasure-map
+   * rewards to `killer` — shared between cannonball kills (resolveCombat) and
+   * ramming kills (resolveRamming) so both credit the same way. */
+  private killShip(ship: AnyShip, killer: AnyShip | undefined) {
+    ship.alive = false;
+    ship.deathTimer = 0;
+    this.events.push({ type: 'sunk', shipId: ship.id, x: ship.body.x, z: ship.body.z });
+
+    if (ship.isBot) {
+      if (killer && !killer.isBot) {
+        killer.economy.gold += ship.goldReward;
+        killer.heat = Math.min(HEAT_MAX, killer.heat + ship.goldReward * HEAT_PER_GOLD_EARNED);
+        this.events.push({ type: 'gold', amount: ship.goldReward, for: killer.id });
+        this.events.push({
+          type: 'message',
+          text: ship.isBoss
+            ? `${ship.name} defeated! +${ship.goldReward} gold — a legendary victory!`
+            : ship.isRival
+              ? `You defeated rival captain ${ship.name}! +${ship.goldReward} gold`
+              : `Enemy sunk! +${ship.goldReward} gold`,
+          duration: ship.isBoss || ship.isRival ? 4000 : undefined,
+          for: killer.id,
+        });
+        if (ship.isRival) {
+          this.events.push({
+            type: 'message',
+            text: `Captain ${killer.name} has defeated the rival captain ${ship.name}!`,
+            duration: 3500,
+          });
+        }
+        if (!ship.isBoss && !ship.isRival && !killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
+          killer.economy.treasureHunt = this.pickTreasureSite();
+          this.events.push({
+            type: 'message',
+            text: 'Found a torn treasure map! Sail toward the golden light.',
+            duration: 3000,
+            for: killer.id,
+          });
+        }
+        this.persist(killer);
+      }
+    } else {
+      this.events.push({ type: 'message', text: 'Your ship has sunk!', duration: 3000, for: ship.id });
+    }
+  }
+
   private resolveCombat() {
     for (const ball of this.cannonballs) {
       if (!ball.alive) continue;
@@ -561,52 +624,76 @@ export class GameRoom {
           damage: ball.damage,
         });
 
-        if (ship.health <= 0) {
-          ship.alive = false;
-          ship.deathTimer = 0;
-          this.events.push({ type: 'sunk', shipId: ship.id, x: ship.body.x, z: ship.body.z });
-          if (ship.isBot) {
-            const killer = this.ships.get(ball.ownerId);
-            if (killer && !killer.isBot) {
-              killer.economy.gold += ship.goldReward;
-              killer.heat = Math.min(HEAT_MAX, killer.heat + ship.goldReward * HEAT_PER_GOLD_EARNED);
-              this.events.push({ type: 'gold', amount: ship.goldReward, for: killer.id });
-              this.events.push({
-                type: 'message',
-                text: ship.isBoss
-                  ? `${ship.name} defeated! +${ship.goldReward} gold — a legendary victory!`
-                  : ship.isRival
-                    ? `You defeated rival captain ${ship.name}! +${ship.goldReward} gold`
-                    : `Enemy sunk! +${ship.goldReward} gold`,
-                duration: ship.isBoss || ship.isRival ? 4000 : undefined,
-                for: killer.id,
-              });
-              if (ship.isRival) {
-                this.events.push({
-                  type: 'message',
-                  text: `Captain ${killer.name} has defeated the rival captain ${ship.name}!`,
-                  duration: 3500,
-                });
-              }
-              if (!ship.isBoss && !ship.isRival && !killer.economy.treasureHunt && Math.random() < TREASURE_MAP_DROP_CHANCE) {
-                killer.economy.treasureHunt = this.pickTreasureSite();
-                this.events.push({
-                  type: 'message',
-                  text: 'Found a torn treasure map! Sail toward the golden light.',
-                  duration: 3000,
-                  for: killer.id,
-                });
-              }
-              this.persist(killer);
-            }
-          } else {
-            this.events.push({ type: 'message', text: 'Your ship has sunk!', duration: 3000, for: ship.id });
-          }
-        }
+        if (ship.health <= 0) this.killShip(ship, this.ships.get(ball.ownerId));
         break;
       }
     }
     this.cannonballs = this.cannonballs.filter((b) => b.alive);
+  }
+
+  /** Driving your hull into a bot at speed damages both sides — see the
+   * RAM_* constants above. Only player-vs-bot pairs collide this way (no
+   * PvP, and bot-vs-bot ramming isn't worth the complexity). */
+  private resolveRamming() {
+    const players = [...this.ships.values()].filter((s): s is PlayerShip => !s.isBot && s.alive);
+    const bots = [...this.ships.values()].filter((s): s is BotShip => s.isBot && s.alive);
+
+    for (const player of players) {
+      if (player.ramCooldown > 0) continue;
+      for (const bot of bots) {
+        if (bot.ramCooldown > 0 || !bot.alive) continue;
+
+        const dx = bot.body.x - player.body.x;
+        const dz = bot.body.z - player.body.z;
+        const dist = Math.hypot(dx, dz);
+        const playerScale = SHIP_CLASS_SCALE[player.economy.shipClass];
+        const minDist = RAM_CONTACT_RADIUS * (playerScale + 0.9);
+        if (dist >= minDist) continue;
+
+        const playerVX = Math.sin(player.body.heading) * player.body.speed;
+        const playerVZ = Math.cos(player.body.heading) * player.body.speed;
+        const botVX = Math.sin(bot.body.heading) * bot.body.speed;
+        const botVZ = Math.cos(bot.body.heading) * bot.body.speed;
+        const relSpeed = Math.hypot(playerVX - botVX, playerVZ - botVZ);
+        if (relSpeed < RAM_MIN_SPEED) continue;
+
+        const damage = Math.min(RAM_MAX_DAMAGE, relSpeed * RAM_DAMAGE_PER_SPEED);
+        player.health = Math.max(0, player.health - damage);
+        bot.health = Math.max(0, bot.health - damage);
+        player.ramCooldown = RAM_COOLDOWN;
+        bot.ramCooldown = RAM_COOLDOWN;
+
+        const nx = dist < 0.001 ? 1 : dx / dist;
+        const nz = dist < 0.001 ? 0 : dz / dist;
+        const overlap = minDist - dist;
+        player.body.x -= nx * overlap * 0.5;
+        player.body.z -= nz * overlap * 0.5;
+        bot.body.x += nx * overlap * 0.5;
+        bot.body.z += nz * overlap * 0.5;
+        player.body.speed *= RAM_KNOCKBACK_SPEED_MULT;
+        bot.body.speed *= RAM_KNOCKBACK_SPEED_MULT;
+
+        const midX = (player.body.x + bot.body.x) / 2;
+        const midZ = (player.body.z + bot.body.z) / 2;
+        this.events.push({ type: 'ram', x: midX, y: 1, z: midZ });
+        this.events.push({ type: 'hit', x: bot.body.x, y: 1, z: bot.body.z, targetId: bot.id, ownerId: player.id, damage });
+        this.events.push({
+          type: 'hit',
+          x: player.body.x,
+          y: 1,
+          z: player.body.z,
+          targetId: player.id,
+          ownerId: bot.id,
+          damage,
+        });
+
+        if (bot.health <= 0) this.killShip(bot, player);
+        if (player.health <= 0) {
+          this.killShip(player, bot);
+          break;
+        }
+      }
+    }
   }
 
   private updateCrates() {
@@ -687,6 +774,7 @@ export class GameRoom {
       health: maxHealthFor(stats),
       maxHealth: maxHealthFor(stats),
       cannonCooldown: 0,
+      ramCooldown: 0,
       alive: true,
       deathTimer: 0,
       ai: { state: 'patrol', patrolX: x, patrolZ: z },
@@ -748,6 +836,7 @@ export class GameRoom {
     const alivePlayers = [...this.ships.values()].filter((s): s is PlayerShip => !s.isBot && s.alive);
 
     for (const ship of [...this.ships.values()]) {
+      if (ship.ramCooldown > 0) ship.ramCooldown = Math.max(0, ship.ramCooldown - dt);
       if (!ship.alive) {
         ship.deathTimer += dt;
         if (!ship.isBot && ship.deathTimer > PLAYER_RESPAWN_DELAY) this.respawnPlayer(ship);
@@ -760,6 +849,7 @@ export class GameRoom {
 
     this.updateCannonballs(dt);
     this.resolveCombat();
+    this.resolveRamming();
     this.updateCrates();
     this.updateTreasureHunts();
     this.updateHeat(dt);

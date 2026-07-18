@@ -96,6 +96,34 @@ export class SoundManager {
     osc.stop(now + 0.22);
   }
 
+  ramImpact() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Wide-band wood crack — beefier and longer than hitImpact's.
+    const src = this.noiseSource();
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 350;
+    filter.Q.value = 0.5;
+    const gain = this.ctx.createGain();
+    src.connect(filter).connect(gain).connect(this.masterGain!);
+    this.envelope(gain, 0.003, 0.22, 1.0);
+    src.start();
+    src.stop(now + 0.3);
+
+    // Deep, slower-decaying thud for real hull-on-hull weight.
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(100, now);
+    osc.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+    const thudGain = this.ctx.createGain();
+    osc.connect(thudGain).connect(this.masterGain!);
+    this.envelope(thudGain, 0.003, 0.32, 0.9);
+    osc.start();
+    osc.stop(now + 0.38);
+  }
+
   sink() {
     if (!this.ctx) return;
     const osc = this.ctx.createOscillator();

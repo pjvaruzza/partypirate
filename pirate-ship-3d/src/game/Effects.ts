@@ -96,6 +96,22 @@ export class Effects {
     this.spawnBurst({ position, count: 6, color: 0x6b4423, speed: 6, size: 0.13, life: 0.45, gravity: 12 });
   }
 
+  /** A hull-to-hull ramming collision — bigger and woodier than a single
+   * cannonball's impactSplinters, since it's two ships crashing together. */
+  hullCrunch(position: THREE.Vector3) {
+    this.spawnBurst({ position, count: 16, color: 0x5c3a21, speed: 8, size: 0.24, life: 0.55, gravity: 11 });
+    this.spawnBurst({
+      position,
+      count: 7,
+      color: 0xffffff,
+      speed: 3,
+      size: 0.32,
+      life: 0.14,
+      gravity: 0,
+      additive: true,
+    });
+  }
+
   sinkExplosion(position: THREE.Vector3) {
     this.spawnBurst({ position, count: 22, color: 0x2b2b2b, speed: 8.5, size: 0.36, life: 1.2, gravity: 9 });
     this.spawnBurst({
