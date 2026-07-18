@@ -97,15 +97,26 @@ export class Effects {
   }
 
   sinkExplosion(position: THREE.Vector3) {
-    this.spawnBurst({ position, count: 14, color: 0x2b2b2b, speed: 7, size: 0.3, life: 1.1, gravity: 9 });
+    this.spawnBurst({ position, count: 22, color: 0x2b2b2b, speed: 8.5, size: 0.36, life: 1.2, gravity: 9 });
     this.spawnBurst({
       position,
-      count: 10,
+      count: 16,
       color: 0xffddaa,
-      speed: 5,
-      size: 0.24,
-      life: 0.4,
+      speed: 6,
+      size: 0.3,
+      life: 0.45,
       gravity: 2,
+      additive: true,
+    });
+    // A bright, near-instant flash at the core for a bigger initial "boom" pop.
+    this.spawnBurst({
+      position,
+      count: 6,
+      color: 0xffffff,
+      speed: 2,
+      size: 0.55,
+      life: 0.16,
+      gravity: 0,
       additive: true,
     });
   }

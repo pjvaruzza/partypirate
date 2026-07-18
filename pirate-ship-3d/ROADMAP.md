@@ -23,6 +23,19 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   ~2.5 units into the water over ~2.2s (with the sink explosion/sound
   firing at the moment of death) instead of vanishing instantly, for both
   enemies and the player.
+- [x] **Impact/weight pass (S):** hits previously registered but didn't
+  *feel* like anything — fixed with: floating damage numbers
+  (`src/game/DamageNumbers.ts`, yellow for damage you deal, red for damage
+  you take), a brief hit-stop freeze-frame on any impact or kill (client
+  rendering-side only — scales that frame's dt down to ~8%, never delays
+  input), a small camera-shake kick both when you fire and when you land a
+  hit (distinct from the bigger shake for taking one), a layered low-thud
+  under the hit sound for punch, and a bigger three-part kill explosion
+  (debris + embers + a bright core flash). The `hit` event now carries
+  `ownerId`/`damage` so the client can tell "you dealt this" from "you took
+  this." Still open: repetitive combat (only one tactic — broadside orbit)
+  and the "visuals look cheap" complaint (procedural low-poly models) —
+  next up per the user, roughly in that order.
 
 ## Tier 2 — Combat depth & variety
 

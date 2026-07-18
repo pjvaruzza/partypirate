@@ -154,7 +154,7 @@ export interface StateMessage {
 export type GameEvent =
   | { type: 'fire'; shipId: string; side: CannonSide }
   | { type: 'splash'; x: number; y: number; z: number }
-  | { type: 'hit'; x: number; y: number; z: number; targetId: string }
+  | { type: 'hit'; x: number; y: number; z: number; targetId: string; ownerId: string; damage: number }
   | { type: 'sunk'; shipId: string; x: number; z: number }
   | { type: 'gold'; amount: number; for: string }
   | { type: 'message'; text: string; duration?: number; for?: string }

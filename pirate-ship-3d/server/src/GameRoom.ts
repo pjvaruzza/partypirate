@@ -551,7 +551,15 @@ export class GameRoom {
 
         ship.health = Math.max(0, ship.health - ball.damage);
         ball.alive = false;
-        this.events.push({ type: 'hit', x: ball.x, y: ball.y, z: ball.z, targetId: ship.id });
+        this.events.push({
+          type: 'hit',
+          x: ball.x,
+          y: ball.y,
+          z: ball.z,
+          targetId: ship.id,
+          ownerId: ball.ownerId,
+          damage: ball.damage,
+        });
 
         if (ship.health <= 0) {
           ship.alive = false;

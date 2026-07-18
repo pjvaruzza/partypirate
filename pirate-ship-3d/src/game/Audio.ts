@@ -71,6 +71,9 @@ export class SoundManager {
 
   hitImpact() {
     if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Crack layer — the wood-splinter transient.
     const src = this.noiseSource();
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -79,7 +82,18 @@ export class SoundManager {
     src.connect(filter).connect(gain).connect(this.masterGain!);
     this.envelope(gain, 0.002, 0.12, 0.8);
     src.start();
-    src.stop(this.ctx.currentTime + 0.2);
+    src.stop(now + 0.2);
+
+    // Thud layer — a fast-dropping low sine underneath for weight/punch.
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.exponentialRampToValueAtTime(45, now + 0.16);
+    const thudGain = this.ctx.createGain();
+    osc.connect(thudGain).connect(this.masterGain!);
+    this.envelope(thudGain, 0.002, 0.18, 0.7);
+    osc.start();
+    osc.stop(now + 0.22);
   }
 
   sink() {

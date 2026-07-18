@@ -6,6 +6,7 @@ import { World, buildCrateMesh } from './game/World';
 import { TreasureMarker } from './game/TreasureMarker';
 import { InputManager } from './game/Input';
 import { Effects } from './game/Effects';
+import { DamageNumbers } from './game/DamageNumbers';
 import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
 import { Chat } from './ui/Chat';
@@ -85,6 +86,7 @@ let world: World | null = null;
 
 // --- effects / sound ----------------------------------------------------
 const effects = new Effects(scene);
+const damageNumbers = new DamageNumbers(scene);
 const sound = new SoundManager();
 function unlockAudio() {
   sound.resume();
@@ -314,6 +316,14 @@ function triggerShake(duration: number, magnitude: number) {
   shakeMagnitude = magnitude;
 }
 
+// A brief near-freeze on cannonball impact so a hit reads as a real event
+// instead of just a particle burst — purely a rendering-side slowdown of
+// this frame's dt (input still sends every frame, so it never adds lag).
+let hitstopTimer = 0;
+function triggerHitstop(duration: number) {
+  hitstopTimer = Math.max(hitstopTimer, duration);
+}
+
 // --- server-driven juice: fire/splash/hit/sunk/message events -----------
 function handleEvents(events: GameEvent[]) {
   for (const ev of events) {
@@ -331,19 +341,27 @@ function handleEvents(events: GameEvent[]) {
         effects.muzzleFlash(origin.clone().add(worldOffset), dir);
       }
       sound.cannonFire();
+      if (ev.shipId === network.yourId) triggerShake(0.1, 0.12);
     } else if (ev.type === 'splash') {
       effects.splash(new THREE.Vector3(ev.x, ev.y, ev.z));
     } else if (ev.type === 'hit') {
       effects.impactSplinters(new THREE.Vector3(ev.x, ev.y, ev.z));
       sound.hitImpact();
       renderedShips.get(ev.targetId)?.flashHit();
-      if (ev.targetId === network.yourId) {
+      const dealt = ev.ownerId === network.yourId;
+      const taken = ev.targetId === network.yourId;
+      damageNumbers.spawn(new THREE.Vector3(ev.x, ev.y, ev.z), ev.damage, dealt);
+      triggerHitstop(taken ? 0.07 : 0.05);
+      if (taken) {
         flashDamage();
         triggerShake(0.35, 0.4);
+      } else if (dealt) {
+        triggerShake(0.15, 0.18);
       }
     } else if (ev.type === 'sunk') {
       effects.sinkExplosion(new THREE.Vector3(ev.x, 0, ev.z));
       sound.sink();
+      triggerHitstop(0.09);
     } else if (ev.type === 'message') {
       hud.showMessage(ev.text, ev.duration);
     } else if (ev.type === 'chat') {
@@ -357,10 +375,15 @@ const clock = new THREE.Clock();
 let elapsed = 0;
 
 function animate() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  let dt = Math.min(clock.getDelta(), 0.05);
+  if (hitstopTimer > 0) {
+    hitstopTimer = Math.max(0, hitstopTimer - dt);
+    dt *= 0.08;
+  }
   elapsed += dt;
   ocean.update(elapsed);
   effects.update(dt);
+  damageNumbers.update(dt);
   for (const mesh of renderedCrates.values()) {
     const h = ocean.getHeightAt(mesh.position.x, mesh.position.z, elapsed);
     mesh.position.y = h + 0.3;
