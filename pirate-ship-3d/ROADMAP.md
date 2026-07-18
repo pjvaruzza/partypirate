@@ -115,8 +115,17 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   triangle that doubles as a compass. When home port is out of the shown
   ~240-unit range, an edge arrow points toward it.
 - **Better art pass (M/L):** replace procedural low-poly meshes with real
-  (or nicer procedural) ship/island models, a day-night cycle, better water
-  shading (foam trails behind the ship, reflections).
+  (or nicer procedural) ship/island models, a day-night cycle. Partially
+  addressed — see the water shading item below; still open: actual model/
+  texture quality, foam trails behind the ship, a day-night cycle.
+- [x] **Water shading (S):** the ocean was fully unlit — one flat color band
+  regardless of light or camera angle, the single biggest "cheap" surface
+  in the scene since it's visible almost 100% of the time. Now computes an
+  analytic per-vertex normal from the wave slope and adds a fresnel blend
+  toward a sky-reflection tint at grazing angles plus a tight specular sun
+  glint, synced to the scene's actual `DirectionalLight` position (passed
+  into `Ocean`'s constructor, not hardcoded). Foam at wave crests is
+  unchanged. Still open: foam trails behind moving ships, real reflections.
 - **Performance pass for low-end mobile (S/M):** LOD for distant islands/
   ocean segments, cheaper shadows, frame budget testing on a throttled device.
 - [x] **Save to an account instead of localStorage (M):** superseded by the
@@ -163,12 +172,14 @@ this first cut:
 ---
 
 **Suggested next session's focus:** a user pass flagged gameplay quality
-directly — combat impact/weight and repetitiveness are now addressed (hit
-feedback pass + ramming); the "visuals look cheap" complaint is the one
-still open from that pass, and is the biggest lift (procedural low-poly
-models, flat lighting/water). Otherwise, roughly in order: (1) onboarding
-tutorial — several systems now exist with no in-game explanation, (2) PvP
-with an opt-in toggle once ready to defend the co-op loop from griefing,
-(3) mobile hosting/testing pass (tunnel for quick testing, or real `wss://`
-hosting for anything durable) — the touch controls exist but the newer UI
-has never been checked on a real mobile viewport.
+directly — combat impact/weight, repetitiveness, and (partially) cheap
+visuals are now addressed (hit feedback pass + ramming + lit water). Still
+open from that pass: actual model/texture quality (ships/islands are still
+the same procedural geometry, just better-lit) and a day-night cycle, if
+the visuals complaint persists after this round. Otherwise, roughly in
+order: (1) onboarding tutorial — several systems now exist with no in-game
+explanation, (2) PvP with an opt-in toggle once ready to defend the co-op
+loop from griefing, (3) mobile hosting/testing pass (tunnel for quick
+testing, or real `wss://` hosting for anything durable) — the touch
+controls exist but the newer UI has never been checked on a real mobile
+viewport.

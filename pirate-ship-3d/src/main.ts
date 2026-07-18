@@ -79,7 +79,7 @@ scene.add(new THREE.AmbientLight(0xbcd9ff, 0.7));
 scene.add(new THREE.HemisphereLight(0xdfefff, 0x1c3d2a, 0.5));
 
 // --- ocean ------------------------------------------------------------------
-const ocean = new Ocean(WORLD_RADIUS * 2.4);
+const ocean = new Ocean(WORLD_RADIUS * 2.4, 180, sun.position);
 scene.add(ocean.mesh);
 
 let world: World | null = null;
