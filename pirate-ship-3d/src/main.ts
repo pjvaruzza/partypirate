@@ -259,7 +259,11 @@ function attemptJoin() {
   }
   joinBtn.disabled = true;
   joinStatus.textContent = 'Connecting…';
-  const wsUrl = `ws://${window.location.hostname}:8787`;
+  // Same-host LAN play derives ws://<hostname>:8787 automatically; an
+  // explicit ?ws=wss://... override lets the client be served from one
+  // origin (e.g. a tunnel) while the game server lives on another.
+  const override = new URLSearchParams(window.location.search).get('ws');
+  const wsUrl = override ?? `ws://${window.location.hostname}:8787`;
   network.connect(wsUrl, name);
 }
 joinBtn.addEventListener('click', attemptJoin);
