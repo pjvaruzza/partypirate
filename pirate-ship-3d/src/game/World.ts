@@ -9,13 +9,17 @@ export interface Island {
   mesh: THREE.Group;
 }
 
-/** Sand near the waterline, grading through rock, up to grass at the summit. */
-function heightGradientColor(t: number, isHomePort: boolean): THREE.Color {
+/** Sand near the waterline, grading through rock, up to grass — then, above
+ * `capMix > 0`, back to bare rock near the summit. Without that last step
+ * the whole top ~20% of every hill was one flat, uniform green, since the
+ * grass/rock lerp already saturates well before t=1. */
+function heightGradientColor(t: number, isHomePort: boolean, capMix: number): THREE.Color {
   const sand = new THREE.Color(0xd9c48f);
   const rock = new THREE.Color(0x8a7a52);
   const grass = new THREE.Color(isHomePort ? 0x4a9a45 : 0x3f7d3a);
-  if (t < 0.3) return sand.clone().lerp(rock, t / 0.3);
-  return rock.clone().lerp(grass, Math.min(1, (t - 0.3) / 0.5));
+  const summitRock = new THREE.Color(0x746a5c);
+  const color = t < 0.3 ? sand.clone().lerp(rock, t / 0.3) : rock.clone().lerp(grass, Math.min(1, (t - 0.3) / 0.5));
+  return capMix > 0 ? color.lerp(summitRock, capMix) : color;
 }
 
 /** A hemisphere with a noise-wobbled rim and a sand/rock/grass vertex-color
@@ -46,24 +50,40 @@ function buildHillMesh(
       0.1 * Math.sin(angle * 3 + seedA) + 0.06 * Math.sin(angle * 5 + seedB) + 0.035 * Math.sin(angle * 9 + seedC);
     const scaleXZ = 1 + wobble * (1 - t * 0.6);
 
-    // Radial relief — ridges and gullies running up the slope. Without this
-    // the hill is a perfectly smooth dome that reads as a muffin rather than
-    // as land. Faded out near the shoreline so the rim still meets the beach
-    // shelf cleanly.
+    // Radial relief — ridges and gullies running up the slope, plus two
+    // finer, smaller-amplitude octaves layered on top for rockiness. Without
+    // the fine octaves the slope was smooth between the broad ridges, which
+    // still read as a muffin at close range.
+    //
+    // All the longitude segments (64 of them) converge to a single point at
+    // the pole, so any angle-dependent term's *physical* wavelength shrinks
+    // toward zero there even though its angular wavelength doesn't — the
+    // fine octaves aliased into a jagged starburst crack right at the
+    // summit. poleFade kills relief entirely at the exact apex, the same
+    // way reliefFade already kills it near the shore.
     const reliefFade = Math.min(1, t / 0.25);
+    const poleFade = Math.min(1, (1 - t) / 0.08);
     const relief =
       (0.075 * Math.sin(angle * 4 + seedA * 1.3) * Math.sin(t * Math.PI * 1.4) +
         0.045 * Math.sin(angle * 7 + seedB * 2.1) * Math.sin(t * Math.PI * 2.3) +
-        0.022 * Math.sin(angle * 13 + seedC * 1.7)) *
-      reliefFade;
+        0.022 * Math.sin(angle * 13 + seedC * 1.7) +
+        0.013 * Math.sin(angle * 23 + seedA * 3.1 + t * 11.0) +
+        0.008 * Math.sin(angle * 37 + seedB * 4.4 - t * 17.0)) *
+      reliefFade *
+      poleFade;
 
     pos.setX(i, x * scaleXZ * (1 + relief));
     pos.setY(i, y * (1 + relief * 0.8));
     pos.setZ(i, z * scaleXZ * (1 + relief));
 
+    // Irregular bare-rock summit cap — the threshold itself is jittered by
+    // angle so the treeline isn't a perfect flat ring.
+    const capThreshold = 0.86 + 0.06 * Math.sin(angle * 5 + seedC * 1.5) + 0.03 * Math.sin(angle * 11 + seedA * 2.2);
+    const capMix = isHomePort ? 0 : THREE.MathUtils.clamp((t - capThreshold) / 0.1, 0, 1);
+
     // Tint the gullies slightly darker so the relief reads even in flat light.
     const shade = 0.9 + Math.random() * 0.2 + relief * 1.6;
-    color.copy(heightGradientColor(t, isHomePort)).multiplyScalar(shade);
+    color.copy(heightGradientColor(t, isHomePort, capMix)).multiplyScalar(shade);
     color.toArray(colorArr, i * 3);
   }
   pos.needsUpdate = true;
@@ -204,6 +224,11 @@ function buildIsland(radius: number, isHomePort: boolean): THREE.Group {
       group.add(leaves);
     }
 
+    // Base-ring rocks, plus one or two small boulder clusters scattered
+    // higher up the slope (up near the new rocky cap) — previously every
+    // rock sat in the same narrow band near the shore, so the upper hillside
+    // had nothing but flat grass color to break it up.
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x746a5c, roughness: 1 });
     const rockCount = 2 + Math.floor(Math.random() * 2);
     for (let i = 0; i < rockCount; i++) {
       const rockScale = 0.3 + Math.random() * 0.35;
@@ -211,11 +236,29 @@ function buildIsland(radius: number, isHomePort: boolean): THREE.Group {
       const dist = radius * (0.55 + Math.random() * 0.35);
       const py = surfaceY(dist);
 
-      const rockGeo = new THREE.IcosahedronGeometry(rockScale, 0);
-      const rock = new THREE.Mesh(rockGeo, new THREE.MeshStandardMaterial({ color: 0x746a5c, roughness: 1 }));
+      const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(rockScale, 0), rockMat);
       rock.position.set(Math.cos(angle) * dist, py + rockScale * 0.4, Math.sin(angle) * dist);
       rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
       group.add(rock);
+    }
+
+    const clusterCount = 1 + Math.floor(Math.random() * 2);
+    for (let c = 0; c < clusterCount; c++) {
+      const clusterAngle = Math.random() * Math.PI * 2;
+      const clusterDist = radius * (0.08 + Math.random() * 0.3);
+      const boulders = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < boulders; i++) {
+        const rockScale = 0.18 + Math.random() * 0.22;
+        const jitter = 0.35 * radius * 0.15;
+        const bx = Math.cos(clusterAngle) * clusterDist + (Math.random() - 0.5) * jitter;
+        const bz = Math.sin(clusterAngle) * clusterDist + (Math.random() - 0.5) * jitter;
+        const py = surfaceY(Math.hypot(bx, bz));
+
+        const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(rockScale, 0), rockMat);
+        rock.position.set(bx, py + rockScale * 0.4, bz);
+        rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+        group.add(rock);
+      }
     }
   }
 

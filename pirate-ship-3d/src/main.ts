@@ -200,21 +200,23 @@ function hashString(s: string): number {
 }
 
 function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
-  // Two masts for anything bigger than a sloop, so class reads structurally
-  // and not just as "the same ship, larger."
-  if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5, masts: 2 as const };
+  // Two masts and a galleon-shaped hull (stepped sterncastle, fuller beam)
+  // for anything bigger than a sloop, so class reads structurally and not
+  // just as "the same ship, larger."
+  if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5, masts: 2 as const, hullClass: 2 as const };
   if (ship.isRival) {
     const c = RIVAL_COLORS[hashString(ship.name) % RIVAL_COLORS.length];
-    return { hullColor: c.hull, sailColor: c.sail, scale: 1.2, masts: 2 as const };
+    return { hullColor: c.hull, sailColor: c.sail, scale: 1.2, masts: 2 as const, hullClass: 2 as const };
   }
-  if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9, masts: 1 as const };
+  if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9, masts: 1 as const, hullClass: 0 as const };
 
   const scale = SHIP_CLASS_SCALE[ship.shipClass];
   const masts: 1 | 2 = ship.shipClass === 'sloop' ? 1 : 2;
+  const hullClass: 0 | 1 | 2 = ship.shipClass === 'sloop' ? 0 : ship.shipClass === 'brigantine' ? 1 : 2;
   // Slightly off-white canvas rather than near-pure white — the brighter
   // value clipped to a flat highlight under the sun and lost the billow.
-  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xd8cdb4, scale, masts };
-  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale, masts };
+  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xd8cdb4, scale, masts, hullClass };
+  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale, masts, hullClass };
 }
 
 function sameLoadout(a: ShipSnapshot['loadout'], b: ShipSnapshot['loadout']): boolean {

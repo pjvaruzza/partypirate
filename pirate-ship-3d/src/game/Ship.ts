@@ -58,21 +58,44 @@ const DECK_CAMBER = 0.07;
  * perched on it showing its keel. */
 const WATERLINE_OFFSET = -0.3;
 
+/** 0/1/2 = sloop/brigantine/galleon. Previously every class was the exact
+ * same hull, scaled — a galleon was just a bigger sloop. This shapes the
+ * beam and stern differently per class instead of only the uniform `scale`
+ * already applied everywhere. */
+export type HullClass = 0 | 1 | 2;
+
+function beamFullnessMult(hullClass: HullClass): number {
+  return hullClass === 0 ? 1 : hullClass === 1 ? 1.08 : 1.2;
+}
+
+/** Extra deck-edge height layered onto the sheer near the stern for the
+ * bigger classes, building a raised aftcastle silhouette — the single most
+ * recognisable "galleon" visual cue — instead of every class sharing one
+ * sheer curve. Fades to nothing by t=0.3 so it doesn't distort the bow. */
+function sternCastleBoost(t: number, hullClass: HullClass): number {
+  if (hullClass === 0) return 0;
+  const aft = Math.max(0, 1 - t / 0.3);
+  const amount = hullClass === 1 ? 0.16 : 0.34;
+  return amount * aft * aft;
+}
+
 /** Half-beam multiplier along the hull; t=0 at the stern, 1 at the bow.
  * Full amidships, fine entry at the bow, moderately full transom. */
-function beamProfile(t: number): number {
+function beamProfile(t: number, hullClass: HullClass = 0): number {
   const peak = 0.42;
-  if (t <= peak) return 0.62 + 0.38 * Math.sin((t / peak) * Math.PI * 0.5);
-  const u = (t - peak) / (1 - peak);
-  return Math.max(0.03, Math.pow(Math.cos(u * Math.PI * 0.5), 0.8));
+  const base =
+    t <= peak
+      ? 0.62 + 0.38 * Math.sin((t / peak) * Math.PI * 0.5)
+      : Math.max(0.03, Math.pow(Math.cos(((t - peak) / (1 - peak)) * Math.PI * 0.5), 0.8));
+  return base * beamFullnessMult(hullClass);
 }
 
 /** Deck-edge height — the classic sheer curve, lowest amidships, sweeping up
  * toward bow and stern. This single curve is most of what makes a hull read
  * as a ship rather than a box. */
-function sheerProfile(t: number): number {
+function sheerProfile(t: number, hullClass: HullClass = 0): number {
   const m = (t - 0.45) / 0.55;
-  return HULL_FREEBOARD * (1 + 0.5 * m * m);
+  return HULL_FREEBOARD * (1 + 0.5 * m * m + sternCastleBoost(t, hullClass));
 }
 
 /** Keel line, with rocker so the bottom rises toward both ends. */
@@ -84,7 +107,7 @@ function keelProfile(t: number): number {
 /** A lofted hull: cross-section "stations" swept from stern to bow, each a
  * rounded-bilge curve running keel → deck edge. Replaces a tapered
  * BoxGeometry, which read as a wedge no matter how well it was shaded. */
-function buildLoftedHullGeometry(scale: number): THREE.BufferGeometry {
+function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.BufferGeometry {
   const STATIONS = 32;
   const GIRTH = 16;
   const positions: number[] = [];
@@ -94,9 +117,9 @@ function buildLoftedHullGeometry(scale: number): THREE.BufferGeometry {
   for (let i = 0; i <= STATIONS; i++) {
     const t = i / STATIONS;
     const z = (t - 0.5) * 2 * HULL_HALF_LENGTH * scale;
-    const beam = beamProfile(t) * HULL_MAX_BEAM * scale;
+    const beam = beamProfile(t, hullClass) * HULL_MAX_BEAM * scale;
     const keelY = keelProfile(t) * scale;
-    const sheerY = sheerProfile(t) * scale;
+    const sheerY = sheerProfile(t, hullClass) * scale;
 
     for (let j = 0; j <= GIRTH; j++) {
       const g = j / GIRTH;
@@ -119,7 +142,7 @@ function buildLoftedHullGeometry(scale: number): THREE.BufferGeometry {
 
   // Transom: fan the open stern section closed from its centroid.
   const sternKeel = keelProfile(0) * scale;
-  const sternSheer = sheerProfile(0) * scale;
+  const sternSheer = sheerProfile(0, hullClass) * scale;
   const sternZ = -HULL_HALF_LENGTH * scale;
   const centroidIndex = positions.length / 3;
   positions.push(0, (sternKeel + sternSheer) * 0.5, sternZ);
@@ -138,7 +161,7 @@ function buildLoftedHullGeometry(scale: number): THREE.BufferGeometry {
 
 /** The deck surface closing the top of the hull, cambered so it crowns along
  * the centreline instead of reading as a flat lid. */
-function buildDeckGeometry(scale: number): THREE.BufferGeometry {
+function buildDeckGeometry(scale: number, hullClass: HullClass): THREE.BufferGeometry {
   const STATIONS = 32;
   const SPAN = 10;
   const positions: number[] = [];
@@ -148,8 +171,8 @@ function buildDeckGeometry(scale: number): THREE.BufferGeometry {
   for (let i = 0; i <= STATIONS; i++) {
     const t = i / STATIONS;
     const z = (t - 0.5) * 2 * HULL_HALF_LENGTH * scale;
-    const beam = beamProfile(t) * HULL_MAX_BEAM * scale;
-    const sheerY = sheerProfile(t) * scale;
+    const beam = beamProfile(t, hullClass) * HULL_MAX_BEAM * scale;
+    const sheerY = sheerProfile(t, hullClass) * scale;
     for (let j = 0; j <= SPAN; j++) {
       const u = j / SPAN;
       const s = u * 2 - 1;
@@ -175,15 +198,15 @@ function buildDeckGeometry(scale: number): THREE.BufferGeometry {
 
 /** Gunwale rail swept along the actual sheer curve — straight box rails left
  * visible gaps once the hull stopped being a rectangular prism. */
-function buildSheerRail(side: 1 | -1, scale: number): THREE.Mesh {
+function buildSheerRail(side: 1 | -1, scale: number, hullClass: HullClass): THREE.Mesh {
   const points: THREE.Vector3[] = [];
   for (let i = 0; i <= 24; i++) {
     const t = i / 24;
-    const beam = beamProfile(t) * HULL_MAX_BEAM * scale;
+    const beam = beamProfile(t, hullClass) * HULL_MAX_BEAM * scale;
     points.push(
       new THREE.Vector3(
         side * beam * 0.985,
-        sheerProfile(t) * scale + 0.055 * scale,
+        sheerProfile(t, hullClass) * scale + 0.055 * scale,
         (t - 0.5) * 2 * HULL_HALF_LENGTH * scale,
       ),
     );
@@ -258,18 +281,24 @@ function buildTriangleSail(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
   return new THREE.Mesh(geo, mat);
 }
 
-function buildHull(hullColor: number, sailColor: number, scale: number, masts: 1 | 2 = 1): THREE.Group {
+function buildHull(
+  hullColor: number,
+  sailColor: number,
+  scale: number,
+  masts: 1 | 2 = 1,
+  hullClass: HullClass = 0,
+): THREE.Group {
   const group = new THREE.Group();
 
   const hullMat = new THREE.MeshStandardMaterial({ color: hullColor, roughness: 0.75, map: woodGrainTexture() });
-  const hull = new THREE.Mesh(buildLoftedHullGeometry(scale), hullMat);
+  const hull = new THREE.Mesh(buildLoftedHullGeometry(scale, hullClass), hullMat);
   hull.castShadow = true;
   hull.receiveShadow = true;
   hull.name = 'hull';
   group.add(hull);
 
   const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6437, roughness: 0.9, map: woodGrainTexture() });
-  const deck = new THREE.Mesh(buildDeckGeometry(scale), deckMat);
+  const deck = new THREE.Mesh(buildDeckGeometry(scale, hullClass), deckMat);
   deck.receiveShadow = true;
   group.add(deck);
 
@@ -328,14 +357,49 @@ function buildHull(hullColor: number, sailColor: number, scale: number, masts: 1
   group.add(flag);
 
   // --- gunwale trim, swept along the sheer curve -------------------------
-  group.add(buildSheerRail(1, scale));
-  group.add(buildSheerRail(-1, scale));
+  group.add(buildSheerRail(1, scale, hullClass));
+  group.add(buildSheerRail(-1, scale, hullClass));
 
-  // --- quarterdeck --------------------------------------------------------
-  const quarterDeck = new THREE.Mesh(new THREE.BoxGeometry(1.0 * scale, 0.3 * scale, 1.0 * scale), deckMat);
-  quarterDeck.position.set(0, 0.72 * scale, -1.3 * scale);
+  // --- quarterdeck, plus a stepped sterncastle for the bigger classes -----
+  // Anchored to the actual (class-boosted) deck height at the stern so it
+  // sits on the deck instead of floating or clipping through it once the
+  // stern got taller. The hull's stern is a raked, curved surface that
+  // tapers to a point at the transom (see buildLoftedHullGeometry's fan
+  // closure) — a flat-bottomed box can't match that exactly, so each tier
+  // is built EMBED deeper than its nominal footing and stacked from there,
+  // guaranteeing overlap with solid geometry instead of a visible gap.
+  const EMBED = 0.12 * scale;
+  const quarterDeckTopY = sheerProfile(0.15, hullClass) * scale + 0.3 * scale;
+  const quarterDeckHeight = 0.3 * scale + EMBED;
+  const quarterDeck = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0 * scale * beamFullnessMult(hullClass), quarterDeckHeight, 1.0 * scale),
+    deckMat,
+  );
+  quarterDeck.position.set(0, quarterDeckTopY - quarterDeckHeight / 2, -1.3 * scale);
   quarterDeck.castShadow = true;
   group.add(quarterDeck);
+
+  if (hullClass >= 1) {
+    const tierHeight = (hullClass === 1 ? 0.35 : 0.55) * scale;
+    const tierWidth = 0.75 * scale * (hullClass === 1 ? 1 : 1.08);
+    const tierTopY = quarterDeckTopY + tierHeight;
+    const tierTotalHeight = tierHeight + EMBED;
+    const sternCastle = new THREE.Mesh(new THREE.BoxGeometry(tierWidth, tierTotalHeight, 0.85 * scale), deckMat);
+    sternCastle.position.set(0, tierTopY - tierTotalHeight / 2, -1.5 * scale);
+    sternCastle.castShadow = true;
+    group.add(sternCastle);
+
+    if (hullClass === 2) {
+      // A third, smaller tier — a proper stepped castle instead of one block.
+      const topHeight = 0.28 * scale;
+      const topTopY = tierTopY + topHeight;
+      const topTotalHeight = topHeight + EMBED;
+      const topTier = new THREE.Mesh(new THREE.BoxGeometry(0.5 * scale, topTotalHeight, 0.55 * scale), deckMat);
+      topTier.position.set(0, topTopY - topTotalHeight / 2, -1.6 * scale);
+      topTier.castShadow = true;
+      group.add(topTier);
+    }
+  }
 
   // --- bowsprit + jib -------------------------------------------------------
   const bowTip = new THREE.Vector3(0, 1.15 * scale, 3.15 * scale);
@@ -359,7 +423,7 @@ function buildHull(hullColor: number, sailColor: number, scale: number, masts: 1
   group.add(
     buildSpar(
       mastTop,
-      new THREE.Vector3(0, sheerProfile(0.08) * scale, -1.75 * scale),
+      new THREE.Vector3(0, sheerProfile(0.08, hullClass) * scale, -1.75 * scale),
       0.015 * scale,
       0.015 * scale,
       ropeColor,
@@ -373,7 +437,11 @@ function buildHull(hullColor: number, sailColor: number, scale: number, masts: 1
     group.add(
       buildSpar(
         mastTop,
-        new THREE.Vector3(side * beamProfile(0.32) * HULL_MAX_BEAM * scale, sheerProfile(0.32) * scale, -0.72 * scale),
+        new THREE.Vector3(
+          side * beamProfile(0.32, hullClass) * HULL_MAX_BEAM * scale,
+          sheerProfile(0.32, hullClass) * scale,
+          -0.72 * scale,
+        ),
         0.012 * scale,
         0.012 * scale,
         ropeColor,
@@ -453,14 +521,27 @@ export class Ship {
 
   constructor(
     stats: ShipStats,
-    opts: { hullColor?: number; sailColor?: number; scale?: number; loadout?: CannonLoadout; masts?: 1 | 2 } = {},
+    opts: {
+      hullColor?: number;
+      sailColor?: number;
+      scale?: number;
+      loadout?: CannonLoadout;
+      masts?: 1 | 2;
+      hullClass?: HullClass;
+    } = {},
   ) {
     this.stats = stats;
     this.scale = opts.scale ?? 1;
     this.loadout = opts.loadout ?? { ...DEFAULT_LOADOUT };
     this.maxHealth = 60 + stats.hullLevel * 40;
     this.health = this.maxHealth;
-    this.group = buildHull(opts.hullColor ?? 0x6b4a2c, opts.sailColor ?? 0xe8e0cf, this.scale, opts.masts ?? 1);
+    this.group = buildHull(
+      opts.hullColor ?? 0x6b4a2c,
+      opts.sailColor ?? 0xe8e0cf,
+      this.scale,
+      opts.masts ?? 1,
+      opts.hullClass ?? 0,
+    );
     this.sailMesh = this.group.getObjectByName('sail') as THREE.Mesh;
     this.hullMesh = this.group.getObjectByName('hull') as THREE.Mesh;
     this.hullMat = this.hullMesh.material as THREE.MeshStandardMaterial;

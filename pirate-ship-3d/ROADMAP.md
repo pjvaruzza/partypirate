@@ -75,9 +75,9 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   visible hull-size jump (1x/1.3x/1.6x scale) plus a stat bonus folded into
   the existing sail/hull upgrade formulas as "free levels." One-time
   purchases in the shipyard, server-authoritative. Brigantines and galleons
-  now also carry a second mast, so class reads structurally rather than only
-  as scale. Still open: a genuinely different hull *shape* per class (they
-  currently share one lofted form, scaled).
+  now also carry a second mast and a genuinely different hull shape (fuller
+  beam, a stepped raised sterncastle), so class reads structurally rather
+  than only as scale — see the art-pass entry above for detail.
 - [x] **Quests/treasure maps (M/L):** sinking a bot has a 25% chance to drop
   a torn map (if you don't already have one active), revealing a glowing
   marker at a random island; sailing into range digs up 200–600 gold
@@ -127,9 +127,19 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   bow entry, transom stern) with a cambered deck, rails swept along the
   sheer, yards, shrouds and bellied sails; classes above sloop carry a
   second mast so they read structurally and not just as "bigger". Islands
-  got 64-segment shelves with a wobbled, irregular coastline and radial
-  ridge/gully relief on the hill. Still open: a real day-night cycle, and
-  genuinely distinct hull *shapes* per class (they still share one form).
+  got 64-segment shelves with a wobbled, irregular coastline, radial
+  ridge/gully relief on the hill (two extra fine octaves for rockiness, each
+  faded out right at the summit — the longitude lines converging at a
+  sphere's pole make any angle-dependent term alias into a jagged starburst
+  there otherwise), an irregular bare-rock summit cap, and boulder clusters
+  scattered at varying elevations instead of only near the shore. Hull
+  *shapes* now differ per class too, not just scale: `beamProfile`/
+  `sheerProfile` take a `HullClass` and brigantine/galleon get a fuller
+  beam and a stepped, raised sterncastle (one tier / two tiers) — each tier
+  is built deliberately deeper than its nominal footing and embedded into
+  the one below, since the hull's raked, curved stern can't be matched
+  exactly by a flat-bottomed box and the mismatch showed as a visible gap.
+  Day-night cycle explicitly out of scope per the user.
 - [x] **Water shading (S):** the ocean was fully unlit — one flat color band
   regardless of light or camera angle, the single biggest "cheap" surface
   in the scene since it's visible almost 100% of the time. Now computes an
@@ -195,14 +205,12 @@ this first cut:
 ---
 
 **Suggested next session's focus:** a user pass flagged gameplay quality
-directly — combat impact/weight, repetitiveness, and (partially) cheap
-visuals are now addressed (hit feedback pass + ramming + lit water). Still
-open from that pass: actual model/texture quality (ships/islands are still
-the same procedural geometry, just better-lit) and a day-night cycle, if
-the visuals complaint persists after this round. Otherwise, roughly in
-order: (1) onboarding tutorial — several systems now exist with no in-game
-explanation, (2) PvP with an opt-in toggle once ready to defend the co-op
-loop from griefing, (3) mobile hosting/testing pass (tunnel for quick
-testing, or real `wss://` hosting for anything durable) — the touch
+directly — combat impact/weight, repetitiveness, and cheap visuals are now
+all addressed (hit feedback pass + ramming + lit water/sky + real hull and
+island geometry). Day-night cycle explicitly deferred per the user. Next,
+roughly in order: (1) onboarding tutorial — several systems now exist with
+no in-game explanation, (2) PvP with an opt-in toggle once ready to defend
+the co-op loop from griefing, (3) mobile hosting/testing pass (tunnel for
+quick testing, or real `wss://` hosting for anything durable) — the touch
 controls exist but the newer UI has never been checked on a real mobile
 viewport.
