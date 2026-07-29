@@ -22,13 +22,17 @@ function heightGradientColor(t: number, isHomePort: boolean): THREE.Color {
  * gradient — reads as a rounded, slightly rugged hill instead of a perfect
  * cone. Geometry radius stays 1 unit tall (y in [0, hillRadius]); the mesh is
  * then y-scaled to the desired height. */
-function buildHillMesh(hillRadius: number, hillHeight: number, baseY: number, isHomePort: boolean): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(hillRadius, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2);
+function buildHillMesh(
+  hillRadius: number,
+  hillHeight: number,
+  baseY: number,
+  isHomePort: boolean,
+  wobbleSeeds: [number, number, number],
+): THREE.Mesh {
+  const geo = new THREE.SphereGeometry(hillRadius, 64, 24, 0, Math.PI * 2, 0, Math.PI / 2);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colorArr = new Float32Array(pos.count * 3);
-  const seedA = Math.random() * Math.PI * 2;
-  const seedB = Math.random() * Math.PI * 2;
-  const seedC = Math.random() * Math.PI * 2;
+  const [seedA, seedB, seedC] = wobbleSeeds;
   const color = new THREE.Color();
 
   for (let i = 0; i < pos.count; i++) {
@@ -41,10 +45,25 @@ function buildHillMesh(hillRadius: number, hillHeight: number, baseY: number, is
     const wobble =
       0.1 * Math.sin(angle * 3 + seedA) + 0.06 * Math.sin(angle * 5 + seedB) + 0.035 * Math.sin(angle * 9 + seedC);
     const scaleXZ = 1 + wobble * (1 - t * 0.6);
-    pos.setX(i, x * scaleXZ);
-    pos.setZ(i, z * scaleXZ);
 
-    color.copy(heightGradientColor(t, isHomePort)).multiplyScalar(0.9 + Math.random() * 0.2);
+    // Radial relief — ridges and gullies running up the slope. Without this
+    // the hill is a perfectly smooth dome that reads as a muffin rather than
+    // as land. Faded out near the shoreline so the rim still meets the beach
+    // shelf cleanly.
+    const reliefFade = Math.min(1, t / 0.25);
+    const relief =
+      (0.075 * Math.sin(angle * 4 + seedA * 1.3) * Math.sin(t * Math.PI * 1.4) +
+        0.045 * Math.sin(angle * 7 + seedB * 2.1) * Math.sin(t * Math.PI * 2.3) +
+        0.022 * Math.sin(angle * 13 + seedC * 1.7)) *
+      reliefFade;
+
+    pos.setX(i, x * scaleXZ * (1 + relief));
+    pos.setY(i, y * (1 + relief * 0.8));
+    pos.setZ(i, z * scaleXZ * (1 + relief));
+
+    // Tint the gullies slightly darker so the relief reads even in flat light.
+    const shade = 0.9 + Math.random() * 0.2 + relief * 1.6;
+    color.copy(heightGradientColor(t, isHomePort)).multiplyScalar(shade);
     color.toArray(colorArr, i * 3);
   }
   pos.needsUpdate = true;
@@ -66,22 +85,52 @@ function buildHillMesh(hillRadius: number, hillHeight: number, baseY: number, is
  * (where it meets dry hillside) — a vertex-color gradient, same technique
  * buildHillMesh already uses, so wet sand actually reads differently from
  * dry sand instead of being one flat material. */
-function buildBeachShelf(topRadius: number, bottomRadius: number, shelfHeight: number, topY: number): THREE.Mesh {
-  const geo = new THREE.CylinderGeometry(topRadius, bottomRadius, shelfHeight, 20);
+function buildBeachShelf(
+  topRadius: number,
+  bottomRadius: number,
+  shelfHeight: number,
+  topY: number,
+  wobbleSeeds: [number, number, number],
+): THREE.Mesh {
+  // 64 radial segments, not 20 — at island scale the old count left clearly
+  // visible flat facets around the whole shoreline.
+  const geo = new THREE.CylinderGeometry(topRadius, bottomRadius, shelfHeight, 64, 1, true);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colorArr = new Float32Array(pos.count * 3);
   const wet = new THREE.Color(0x9c8558);
   const dry = new THREE.Color(0xdcc793);
   const color = new THREE.Color();
+  const [seedA, seedB, seedC] = wobbleSeeds;
 
   for (let i = 0; i < pos.count; i++) {
-    const t = THREE.MathUtils.clamp(pos.getY(i) / shelfHeight + 0.5, 0, 1);
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const angle = Math.atan2(z, x);
+
+    // Same angular wobble buildHillMesh uses (and the same seeds, so the
+    // shore lines up with the hill above it) — a perfectly circular
+    // coastline is the single clearest "this is a primitive" tell.
+    const wobble =
+      0.1 * Math.sin(angle * 3 + seedA) + 0.06 * Math.sin(angle * 5 + seedB) + 0.035 * Math.sin(angle * 9 + seedC);
+    const scaleXZ = 1 + wobble;
+    pos.setX(i, x * scaleXZ);
+    pos.setZ(i, z * scaleXZ);
+
+    const t = THREE.MathUtils.clamp(y / shelfHeight + 0.5, 0, 1);
     color.copy(wet).lerp(dry, t).multiplyScalar(0.92 + Math.random() * 0.16);
     color.toArray(colorArr, i * 3);
   }
+  pos.needsUpdate = true;
   geo.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
+  geo.computeVertexNormals();
 
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, map: specklTexture() });
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 1,
+    map: specklTexture(),
+    side: THREE.DoubleSide,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = topY - shelfHeight / 2;
   mesh.receiveShadow = true;
@@ -91,13 +140,21 @@ function buildBeachShelf(topRadius: number, bottomRadius: number, shelfHeight: n
 function buildIsland(radius: number, isHomePort: boolean): THREE.Group {
   const group = new THREE.Group();
 
+  // Shared between the shelf and the hill so the wobbled coastline and the
+  // wobbled hillside above it line up instead of fighting each other.
+  const wobbleSeeds: [number, number, number] = [
+    Math.random() * Math.PI * 2,
+    Math.random() * Math.PI * 2,
+    Math.random() * Math.PI * 2,
+  ];
+
   const hillRadius = radius * 0.85;
   const shelfHeight = radius * 0.35;
   const beachTopY = shelfHeight * 0.4;
-  group.add(buildBeachShelf(hillRadius, radius * 1.15, shelfHeight, beachTopY));
+  group.add(buildBeachShelf(hillRadius, radius * 1.15, shelfHeight, beachTopY, wobbleSeeds));
 
   const hillHeight = radius * (isHomePort ? 0.7 : 0.85);
-  group.add(buildHillMesh(hillRadius, hillHeight, beachTopY, isHomePort));
+  group.add(buildHillMesh(hillRadius, hillHeight, beachTopY, isHomePort, wobbleSeeds));
   const summitY = beachTopY + hillHeight;
 
   /** Y coordinate of the hill's surface at a given horizontal distance from its axis. */

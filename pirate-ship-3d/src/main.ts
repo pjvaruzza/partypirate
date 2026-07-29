@@ -22,7 +22,6 @@ const joinName = document.getElementById('join-name') as HTMLInputElement;
 const joinBtn = document.getElementById('join-btn') as HTMLButtonElement;
 const joinStatus = document.getElementById('join-status') as HTMLParagraphElement;
 
-const WORLD_RADIUS = 900;
 
 function createSkyTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -79,7 +78,12 @@ scene.add(new THREE.AmbientLight(0xbcd9ff, 0.7));
 scene.add(new THREE.HemisphereLight(0xdfefff, 0x1c3d2a, 0.5));
 
 // --- ocean ------------------------------------------------------------------
-const ocean = new Ocean(WORLD_RADIUS * 2.4, 180, sun.position);
+// Sized to comfortably exceed the fog distance (950) in every direction from
+// the player rather than to span the whole world — the mesh follows the
+// player, so it only ever needs to cover what's actually visible. The higher
+// segment count keeps vertex spacing fine enough that the rendered surface
+// matches getHeightAt() closely, which is what ships float on.
+const ocean = new Ocean(2200, 256, sun.position);
 scene.add(ocean.mesh);
 
 let world: World | null = null;
@@ -213,7 +217,9 @@ function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
   }
   if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
   const scale = SHIP_CLASS_SCALE[ship.shipClass];
-  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xf2ead6, scale };
+  // Slightly off-white canvas rather than near-pure white — the brighter
+  // value clipped to a flat highlight under the sun and lost the billow.
+  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xd8cdb4, scale };
   return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale };
 }
 
@@ -476,6 +482,7 @@ function animate() {
   }
 
   if (mine && myShip) {
+    ocean.followTarget(mine.x, mine.z);
     hud.setHealth(mine.health, mine.maxHealth);
     const nearPort = world!.isNearHomePort(new THREE.Vector3(mine.x, 0, mine.z));
     portBtn.classList.toggle('hidden', !nearPort);

@@ -19,25 +19,28 @@ const vertexShader = /* glsl */ `
   }
 
   void main() {
-    vec3 pos = position;
-    vec2 p = pos.xy;
+    // The wave field is evaluated in WORLD space, not mesh-local space, so
+    // the mesh can follow the player without the waves sliding along with
+    // it. p.y = -worldZ matches getHeightAt()'s convention below.
+    vec4 world = modelMatrix * vec4(position, 1.0);
+    vec2 p = vec2(world.x, -world.z);
 
     vec3 w1 = waveWithDeriv(p, normalize(vec2(1.0, 0.3)), 0.06, 0.9, 1.4, uTime);
     vec3 w2 = waveWithDeriv(p, normalize(vec2(-0.4, 1.0)), 0.11, 0.5, 1.9, uTime);
     vec3 w3 = waveWithDeriv(p, normalize(vec2(0.7, -0.6)), 0.22, 0.25, 2.6, uTime);
     float h = w1.x + w2.x + w3.x;
-    float dhdx = w1.y + w2.y + w3.y;
-    float dhdy = w1.z + w2.z + w3.z;
+    float dhdx = w1.y + w2.y + w3.y; // d(h)/d(worldX)
+    float dhdy = w1.z + w2.z + w3.z; // d(h)/d(p.y), and p.y = -worldZ
 
-    pos.z += h;
+    world.y += h;
     vHeight = h;
 
     // Analytic surface normal from the wave slope, so the water actually
-    // catches light instead of reading as a flat painted color.
-    vec3 localNormal = normalize(vec3(-dhdx, -dhdy, 1.0));
-    vNormal = normalize(mat3(modelMatrix) * localNormal);
+    // catches light instead of reading as a flat painted color. For a
+    // height field y = h(x,z): N = normalize(-dh/dx, 1, -dh/dz), and
+    // dh/dz = -dhdy because p.y is negated world z.
+    vNormal = normalize(vec3(-dhdx, 1.0, dhdy));
 
-    vec4 world = modelMatrix * vec4(pos, 1.0);
     vWorldPos = world.xyz;
     gl_Position = projectionMatrix * viewMatrix * world;
   }
@@ -56,15 +59,31 @@ const fragmentShader = /* glsl */ `
   varying float vHeight;
 
   /** A soft, animated band straddling an island's shoreline — reuses the
-   * same "foam" color as wave-crest foam rather than a separate system. */
+   * same "foam" color as wave-crest foam rather than a separate system.
+   * The shore radius is perturbed by the same angular wobble World.ts uses
+   * on the island geometry, so the foam follows an irregular coastline
+   * instead of drawing a mathematically perfect ring. */
   float shoreFoam() {
     float total = 0.0;
     for (int i = 0; i < ${MAX_ISLANDS}; i++) {
       if (i >= uIslandCount) break;
       vec3 isl = uIslands[i];
-      float d = length(vWorldPos.xz - isl.xy) - isl.z;
-      float band = 1.0 - smoothstep(0.0, 2.5, abs(d - 1.0));
-      band *= 0.65 + 0.35 * sin(d * 5.0 - uTime * 1.8);
+      vec2 rel = vWorldPos.xz - isl.xy;
+      float angle = atan(rel.y, rel.x);
+      // Matches buildBeachShelf's wobble amplitudes; the phase offsets are
+      // per-island (derived from position) rather than shared.
+      float phase = isl.x * 0.37 + isl.y * 0.71;
+      float wobble =
+        0.10 * sin(angle * 3.0 + phase) +
+        0.06 * sin(angle * 5.0 + phase * 1.7) +
+        0.035 * sin(angle * 9.0 + phase * 2.3);
+      float shoreR = isl.z * (1.0 + wobble);
+
+      float d = length(rel) - shoreR;
+      // Surf runs up and back rather than sitting still.
+      float surge = 0.9 * sin(uTime * 0.9 + phase);
+      float band = 1.0 - smoothstep(0.0, 3.0, abs(d - 1.0 - surge));
+      band *= 0.55 + 0.45 * sin(d * 2.2 - uTime * 1.6 + angle * 4.0);
       total = max(total, band);
     }
     return total;
@@ -109,7 +128,12 @@ export class Ocean {
   readonly mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
 
-  constructor(size = 4000, segments = 180, sunDirection: THREE.Vector3 = new THREE.Vector3(120, 200, 80)) {
+  /** World units between adjacent vertices — the mesh is snapped to this grid
+   * when following the player so the surface never crawls or swims. */
+  private readonly cellSize: number;
+
+  constructor(size = 1800, segments = 256, sunDirection: THREE.Vector3 = new THREE.Vector3(120, 200, 80)) {
+    this.cellSize = size / segments;
     const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
     this.material = new THREE.ShaderMaterial({
       vertexShader,
@@ -130,6 +154,16 @@ export class Ocean {
 
   update(time: number) {
     this.material.uniforms.uTime.value = time;
+  }
+
+  /** Keep the (finite) water mesh centred on the player, snapped to the
+   * vertex grid. Previously the plane was static at the origin and stopped
+   * well short of the fog distance, so sailing toward the world edge would
+   * eventually show the ocean simply ending. */
+  followTarget(x: number, z: number) {
+    const snappedX = Math.round(x / this.cellSize) * this.cellSize;
+    const snappedZ = Math.round(z / this.cellSize) * this.cellSize;
+    this.mesh.position.set(snappedX, 0, snappedZ);
   }
 
   /** Islands arrive from the server (welcome message) after Ocean is already
