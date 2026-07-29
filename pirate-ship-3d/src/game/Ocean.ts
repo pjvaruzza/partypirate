@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import type { IslandInfo } from '../shared/protocol';
+
+/** Fixed-size uniform array cap — GLSL loop bounds must be constants, and the
+ * world only ever has ~13 islands, so this leaves comfortable headroom. */
+const MAX_ISLANDS = 16;
 
 const vertexShader = /* glsl */ `
   uniform float uTime;
@@ -40,9 +45,30 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform vec3 uSunDir;
+  uniform float uTime;
+  // xy = island center (world x, z), z = effective shore radius
+  // (island.radius * 1.15, matching the beach shelf's actual bottom radius
+  // in World.ts).
+  uniform vec3 uIslands[${MAX_ISLANDS}];
+  uniform int uIslandCount;
   varying vec3 vWorldPos;
   varying vec3 vNormal;
   varying float vHeight;
+
+  /** A soft, animated band straddling an island's shoreline — reuses the
+   * same "foam" color as wave-crest foam rather than a separate system. */
+  float shoreFoam() {
+    float total = 0.0;
+    for (int i = 0; i < ${MAX_ISLANDS}; i++) {
+      if (i >= uIslandCount) break;
+      vec3 isl = uIslands[i];
+      float d = length(vWorldPos.xz - isl.xy) - isl.z;
+      float band = 1.0 - smoothstep(0.0, 2.5, abs(d - 1.0));
+      band *= 0.65 + 0.35 * sin(d * 5.0 - uTime * 1.8);
+      total = max(total, band);
+    }
+    return total;
+  }
 
   void main() {
     vec3 deep = vec3(0.02, 0.13, 0.28);
@@ -72,7 +98,7 @@ const fragmentShader = /* glsl */ `
     float spec = pow(max(dot(N, H), 0.0), 120.0);
     color += vec3(1.0, 0.97, 0.88) * spec * 0.9;
 
-    float foamMix = smoothstep(1.05, 1.5, vHeight);
+    float foamMix = max(smoothstep(1.05, 1.5, vHeight), shoreFoam() * 0.85);
     color = mix(color, foam, foamMix * 0.6);
 
     gl_FragColor = vec4(color, 1.0);
@@ -93,6 +119,8 @@ export class Ocean {
         // Pass the scene's actual sun position so the water's specular
         // glint lines up with the real DirectionalLight, not a guess.
         uSunDir: { value: sunDirection.clone().normalize() },
+        uIslands: { value: Array.from({ length: MAX_ISLANDS }, () => new THREE.Vector3()) },
+        uIslandCount: { value: 0 },
       },
     });
     this.mesh = new THREE.Mesh(geometry, this.material);
@@ -102,6 +130,18 @@ export class Ocean {
 
   update(time: number) {
     this.material.uniforms.uTime.value = time;
+  }
+
+  /** Islands arrive from the server (welcome message) after Ocean is already
+   * constructed, so this is set once the world is known rather than passed
+   * to the constructor. Silently drops islands beyond MAX_ISLANDS. */
+  setIslands(islands: IslandInfo[]) {
+    const target = this.material.uniforms.uIslands.value as THREE.Vector3[];
+    const count = Math.min(islands.length, MAX_ISLANDS);
+    for (let i = 0; i < count; i++) {
+      target[i].set(islands[i].x, islands[i].z, islands[i].radius * 1.15);
+    }
+    this.material.uniforms.uIslandCount.value = count;
   }
 
   /** Approximate wave height at a world x,z — mirrors the vertex shader math.

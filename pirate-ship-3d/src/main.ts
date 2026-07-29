@@ -274,6 +274,7 @@ joinName.addEventListener('keydown', (e) => {
 network.onWelcome = (msg) => {
   clearWorldState();
   world = new World(scene, msg.islands);
+  ocean.setIslands(msg.islands);
   joinScreen.classList.add('hidden');
 };
 network.onDisconnect = () => {

@@ -61,10 +61,27 @@ function buildHillMesh(hillRadius: number, hillHeight: number, baseY: number, is
 }
 
 /** A squat, mostly-submerged cone that widens toward the waterline, giving
- * the hill a sandy shore instead of plunging straight into the sea. */
+ * the hill a sandy shore instead of plunging straight into the sea. The
+ * bottom edge (near/under the waterline) is darker and cooler than the top
+ * (where it meets dry hillside) — a vertex-color gradient, same technique
+ * buildHillMesh already uses, so wet sand actually reads differently from
+ * dry sand instead of being one flat material. */
 function buildBeachShelf(topRadius: number, bottomRadius: number, shelfHeight: number, topY: number): THREE.Mesh {
   const geo = new THREE.CylinderGeometry(topRadius, bottomRadius, shelfHeight, 20);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xdcc793, roughness: 1, map: specklTexture() });
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colorArr = new Float32Array(pos.count * 3);
+  const wet = new THREE.Color(0x9c8558);
+  const dry = new THREE.Color(0xdcc793);
+  const color = new THREE.Color();
+
+  for (let i = 0; i < pos.count; i++) {
+    const t = THREE.MathUtils.clamp(pos.getY(i) / shelfHeight + 0.5, 0, 1);
+    color.copy(wet).lerp(dry, t).multiplyScalar(0.92 + Math.random() * 0.16);
+    color.toArray(colorArr, i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
+
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, map: specklTexture() });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = topY - shelfHeight / 2;
   mesh.receiveShadow = true;

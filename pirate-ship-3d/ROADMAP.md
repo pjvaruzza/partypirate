@@ -126,6 +126,17 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   glint, synced to the scene's actual `DirectionalLight` position (passed
   into `Ocean`'s constructor, not hardcoded). Foam at wave crests is
   unchanged. Still open: foam trails behind moving ships, real reflections.
+- [x] **Shoreline foam + wet/dry island gradient (S):** islands looked like
+  they were floating in uniform-depth water with no transition. `Ocean.ts`
+  now takes a `setIslands()` call (islands arrive from the server after
+  Ocean is constructed) and blends toward the existing foam color in a
+  soft, animated band around each island's actual shore edge (`radius *
+  1.15`, matching the beach shelf's real bottom radius) — reuses the
+  wave-crest foam system rather than a new one. `World.ts`'s beach shelf
+  also gained a vertical wet→dry vertex-color gradient (darker/cooler near
+  the waterline), matching the technique `buildHillMesh` already used;
+  previously the shelf was one flat material color. Verified with no
+  shader compile errors at both a desktop and iPhone-emulated viewport.
 - **Performance pass for low-end mobile (S/M):** LOD for distant islands/
   ocean segments, cheaper shadows, frame budget testing on a throttled device.
 - [x] **Save to an account instead of localStorage (M):** superseded by the
