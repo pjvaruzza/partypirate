@@ -1,6 +1,7 @@
 import './style.css';
 import * as THREE from 'three';
 import { Ocean } from './game/Ocean';
+import { Sky } from './game/Sky';
 import { Ship, cannonMountOffsets } from './game/Ship';
 import { World, buildCrateMesh } from './game/World';
 import { TreasureMarker } from './game/TreasureMarker';
@@ -23,22 +24,6 @@ const joinBtn = document.getElementById('join-btn') as HTMLButtonElement;
 const joinStatus = document.getElementById('join-status') as HTMLParagraphElement;
 
 
-function createSkyTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 2;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
-  gradient.addColorStop(0, '#3f7fc4');
-  gradient.addColorStop(0.55, '#9fd8f0');
-  gradient.addColorStop(1, '#e3f5fb');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 2, 256);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
 // --- renderer / scene / camera -------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -49,7 +34,6 @@ renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = createSkyTexture();
 scene.fog = new THREE.Fog(0xcfeaf6, 200, 950);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
@@ -85,6 +69,12 @@ scene.add(new THREE.HemisphereLight(0xdfefff, 0x1c3d2a, 0.5));
 // matches getHeightAt() closely, which is what ships float on.
 const ocean = new Ocean(2200, 256, sun.position);
 scene.add(ocean.mesh);
+
+// --- sky --------------------------------------------------------------------
+// Horizon colour matches scene.fog so distant geometry dissolves into the
+// sky rather than into a differently-coloured band.
+const sky = new Sky(sun.position, 0xcfeaf6, 0x2f6fb5);
+scene.add(sky.mesh);
 
 let world: World | null = null;
 
@@ -210,17 +200,21 @@ function hashString(s: string): number {
 }
 
 function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
-  if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5 };
+  // Two masts for anything bigger than a sloop, so class reads structurally
+  // and not just as "the same ship, larger."
+  if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5, masts: 2 as const };
   if (ship.isRival) {
     const c = RIVAL_COLORS[hashString(ship.name) % RIVAL_COLORS.length];
-    return { hullColor: c.hull, sailColor: c.sail, scale: 1.2 };
+    return { hullColor: c.hull, sailColor: c.sail, scale: 1.2, masts: 2 as const };
   }
-  if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9 };
+  if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9, masts: 1 as const };
+
   const scale = SHIP_CLASS_SCALE[ship.shipClass];
+  const masts: 1 | 2 = ship.shipClass === 'sloop' ? 1 : 2;
   // Slightly off-white canvas rather than near-pure white — the brighter
   // value clipped to a flat highlight under the sun and lost the billow.
-  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xd8cdb4, scale };
-  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale };
+  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xd8cdb4, scale, masts };
+  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale, masts };
 }
 
 function sameLoadout(a: ShipSnapshot['loadout'], b: ShipSnapshot['loadout']): boolean {
@@ -396,6 +390,7 @@ function animate() {
   }
   elapsed += dt;
   ocean.update(elapsed);
+  sky.update(elapsed);
   effects.update(dt);
   damageNumbers.update(dt);
   for (const mesh of renderedCrates.values()) {
@@ -507,6 +502,10 @@ function animate() {
   }
 
   if (damageFlash > 0) damageFlash = Math.max(0, damageFlash - dt * 2);
+
+  // After all camera movement (including shake) has settled, so the dome
+  // stays exactly centred on the viewer.
+  sky.followTarget(camera.position.x, camera.position.y, camera.position.z);
 
   renderer.render(scene, camera);
   requestAnimationFrame(animate);

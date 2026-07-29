@@ -33,9 +33,8 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   under the hit sound for punch, and a bigger three-part kill explosion
   (debris + embers + a bright core flash). The `hit` event now carries
   `ownerId`/`damage` so the client can tell "you dealt this" from "you took
-  this." Still open: the "visuals look cheap" complaint (procedural
-  low-poly models) — biggest remaining lift, deferred since it has real
-  diminishing returns without actual art assets.
+  this." (The "visuals look cheap" follow-up is addressed under the art and
+  sky items in Tier 4.)
 
 ## Tier 2 — Combat depth & variety
 
@@ -75,9 +74,10 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   brigantine (4 slots, 900g) → galleon (6 slots, 3000g) — each a real,
   visible hull-size jump (1x/1.3x/1.6x scale) plus a stat bonus folded into
   the existing sail/hull upgrade formulas as "free levels." One-time
-  purchases in the shipyard, server-authoritative. Still open: a genuinely
-  different hull shape per class (currently same model, scaled) and a second
-  mast for the bigger classes.
+  purchases in the shipyard, server-authoritative. Brigantines and galleons
+  now also carry a second mast, so class reads structurally rather than only
+  as scale. Still open: a genuinely different hull *shape* per class (they
+  currently share one lofted form, scaled).
 - [x] **Quests/treasure maps (M/L):** sinking a bot has a 25% chance to drop
   a torn map (if you don't already have one active), revealing a glowing
   marker at a random island; sailing into range digs up 200–600 gold
@@ -106,6 +106,12 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
 
 ## Tier 4 — Production polish
 
+- [x] **Sky (S):** was a 2x256 canvas gradient assigned to `scene.background`,
+  which three.js draws in screen space — so it never responded to view
+  direction and had no sun. Now a real dome (`src/game/Sky.ts`): horizon-to-
+  zenith gradient matched to the scene fog, a sun disc and scatter glow
+  placed at the actual `DirectionalLight` direction, and a drifting
+  procedural cloud layer. Follows the camera so it can't be sailed out of.
 - **Onboarding (S):** a short first-run tutorial overlay explaining controls
   and the cannon builder instead of dropping the player in cold.
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
@@ -114,10 +120,16 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   orange/red for rivals and bosses), and your own heading as a center
   triangle that doubles as a compass. When home port is out of the shown
   ~240-unit range, an edge arrow points toward it.
-- **Better art pass (M/L):** replace procedural low-poly meshes with real
-  (or nicer procedural) ship/island models, a day-night cycle. Partially
-  addressed — see the water shading item below; still open: actual model/
-  texture quality, foam trails behind the ship, a day-night cycle.
+- [x] **Better art pass (M/L):** the geometry itself was the problem, not the
+  shading — hulls were a `BoxGeometry` with a few vertices nudged sideways
+  and beaches were 20-segment cylinders with countable facets. Ships are now
+  lofted from cross-section stations (rounded bilge, real sheer curve, fine
+  bow entry, transom stern) with a cambered deck, rails swept along the
+  sheer, yards, shrouds and bellied sails; classes above sloop carry a
+  second mast so they read structurally and not just as "bigger". Islands
+  got 64-segment shelves with a wobbled, irregular coastline and radial
+  ridge/gully relief on the hill. Still open: a real day-night cycle, and
+  genuinely distinct hull *shapes* per class (they still share one form).
 - [x] **Water shading (S):** the ocean was fully unlit — one flat color band
   regardless of light or camera angle, the single biggest "cheap" surface
   in the scene since it's visible almost 100% of the time. Now computes an

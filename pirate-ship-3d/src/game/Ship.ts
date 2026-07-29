@@ -258,7 +258,7 @@ function buildTriangleSail(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
   return new THREE.Mesh(geo, mat);
 }
 
-function buildHull(hullColor: number, sailColor: number, scale: number): THREE.Group {
+function buildHull(hullColor: number, sailColor: number, scale: number, masts: 1 | 2 = 1): THREE.Group {
   const group = new THREE.Group();
 
   const hullMat = new THREE.MeshStandardMaterial({ color: hullColor, roughness: 0.75, map: woodGrainTexture() });
@@ -294,6 +294,31 @@ function buildHull(hullColor: number, sailColor: number, scale: number): THREE.G
   yard.position.set(0, 3.3 * scale, -0.2 * scale);
   yard.castShadow = true;
   group.add(yard);
+
+  // Bigger classes carry a foremast — previously brigantines and galleons
+  // were just a sloop scaled up, so class was only readable as size.
+  if (masts === 2) {
+    const foreMast = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05 * scale, 0.07 * scale, 2.5 * scale, 16),
+      mastMat,
+    );
+    foreMast.position.set(0, 1.75 * scale, 1.05 * scale);
+    foreMast.castShadow = true;
+    group.add(foreMast);
+
+    const foreSail = buildBilloweSail(1.05 * scale, 1.6 * scale, 0.22 * scale, sailColor);
+    foreSail.position.set(0, 1.85 * scale, 1.06 * scale);
+    group.add(foreSail);
+
+    const foreYard = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03 * scale, 0.03 * scale, 1.3 * scale, 8),
+      mastMat,
+    );
+    foreYard.rotation.z = Math.PI / 2;
+    foreYard.position.set(0, 2.65 * scale, 1.05 * scale);
+    foreYard.castShadow = true;
+    group.add(foreYard);
+  }
 
   const flagGeo = new THREE.ConeGeometry(0.15 * scale, 0.4 * scale, 4);
   const flagMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
@@ -428,14 +453,14 @@ export class Ship {
 
   constructor(
     stats: ShipStats,
-    opts: { hullColor?: number; sailColor?: number; scale?: number; loadout?: CannonLoadout } = {},
+    opts: { hullColor?: number; sailColor?: number; scale?: number; loadout?: CannonLoadout; masts?: 1 | 2 } = {},
   ) {
     this.stats = stats;
     this.scale = opts.scale ?? 1;
     this.loadout = opts.loadout ?? { ...DEFAULT_LOADOUT };
     this.maxHealth = 60 + stats.hullLevel * 40;
     this.health = this.maxHealth;
-    this.group = buildHull(opts.hullColor ?? 0x6b4a2c, opts.sailColor ?? 0xe8e0cf, this.scale);
+    this.group = buildHull(opts.hullColor ?? 0x6b4a2c, opts.sailColor ?? 0xe8e0cf, this.scale, opts.masts ?? 1);
     this.sailMesh = this.group.getObjectByName('sail') as THREE.Mesh;
     this.hullMesh = this.group.getObjectByName('hull') as THREE.Mesh;
     this.hullMat = this.hullMesh.material as THREE.MeshStandardMaterial;
