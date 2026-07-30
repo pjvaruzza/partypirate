@@ -138,6 +138,34 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   wording via the same `(hover: none), (pointer: coarse)` media query
   already used to hide the touch controls on desktop, so the tips actually
   match the controls the player has in front of them.
+- [x] **Mobile touch-target/reachability pass (S):** first dedicated
+  ergonomics audit of the shipyard and ammo-selector UI added after the
+  original mobile viewport review — verified with Playwright device presets
+  (`devices['iPhone 8']` for the 375×667 SE-class bar the task called for,
+  plus a spot-check at the old 320×568 SE and 390×664 iPhone-13-class) rather
+  than a resized desktop window, so `pointer: coarse`/`hover: none` actually
+  apply. Found and fixed: (1) **the Starboard cannon-placement column
+  rendered fully off-screen and untappable** on every phone width tested,
+  320–390px, only clearing at desktop widths — `.cannon-builder-row`'s three
+  `flex: 1` columns each hit their min-content width (fixed-size +/- buttons
+  + count can't shrink further) before the row itself could, so it
+  overflowed its panel. Switched to a 2-column CSS grid (Port/Starboard
+  paired on top, since they're the natural mirrored pair; Bow — a different
+  firing arc — gets its own full-width row below), which also reads better
+  on desktop than the old cramped 3-up strip. Confirmed fixed with a real
+  Playwright `tap()` on the previously-unreachable Starboard button plus
+  bounding-rect checks showing zero off-screen buttons at 320/375/390/1280px.
+  (2) `.slot-btn` (40→44px), `.buy-btn` (~32px tall→44px min-height), and
+  `.ammo-btn` (42→44px) were all under the 44×44 touch-target minimum;
+  bumped all three, verified via `tap()` (ammo-selector fire-shot swap) and
+  bounding-rect measurement. Verified via before/after screenshots at
+  375×667 plus a 1280×800 desktop screenshot to confirm the grid layout
+  doesn't regress the non-mobile view. Not addressed this pass: the
+  mute/chat/help icon-button cluster measured a ~22×18 hit area, well under
+  44×44 — flagged as a handoff below rather than shipped, since fixing it
+  safely needs a real layout treatment (naively growing all three risks
+  colliding with the health-bar/gold-counter cluster at 375px width) that
+  wasn't feasible to verify cleanly in the same pass.
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
   (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
   other ships as color-coded blips (blue players, red bots, brighter

@@ -272,6 +272,12 @@ body {
   cursor: pointer;
   white-space: nowrap;
   min-width: 84px;
+  /* Was ~32px tall (padding + line-height only) — under the 44px touch
+     target minimum for the shipyard's primary purchase action. */
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .buy-btn:disabled {
@@ -301,13 +307,37 @@ body {
   color: #fff;
 }
 
+/* Grid, not flex: at narrow phone widths (down to the 320px old-SE), three
+   flex:1 columns each hit their min-content width (buttons + count can't
+   shrink further) before the row itself does, so the row overflowed its
+   panel and the Starboard column's controls rendered off-screen —
+   untappable, confirmed via Playwright bounding-rect checks at 320/375/390px
+   viewports. Port/Starboard are the natural pair (mirrored sides), so they
+   share the top row; Bow — a different firing arc entirely — gets its own
+   full-width row below, which reads better than a cramped 3-up strip even
+   on desktop where there'd technically be room for 3 columns. */
 .cannon-builder-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
+.cannon-slot[data-side='left'] {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.cannon-slot[data-side='right'] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.cannon-slot[data-side='front'] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
 .cannon-slot {
-  flex: 1;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;
@@ -329,8 +359,10 @@ body {
 }
 
 .slot-btn {
-  width: 40px;
-  height: 40px;
+  /* 44x44 is the standard minimum touch target; was 40x40, verified too
+     small at phone viewports alongside the layout-overflow fix above. */
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   border: none;
   background: #3a5a78;
@@ -599,8 +631,9 @@ body {
 
 .ammo-btn {
   position: relative;
-  width: 42px;
-  height: 42px;
+  /* Was 42x42 — just under the 44px touch target minimum. */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.35);
   background: rgba(20, 15, 10, 0.6);
