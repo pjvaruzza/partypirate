@@ -219,12 +219,27 @@ body {
   cursor: not-allowed;
 }
 
+/* The 6 upgrade rows + cannon builder can outgrow short phone viewports
+   (confirmed: 781px of content vs a 664px iPhone-8 viewport) once buy-btn
+   grew to the 44px touch-target minimum. Cap the panel to the viewport and
+   let only the middle section scroll — h2 and the "Set Sail" close button
+   stay outside #shipyard-scroll so the close action is always visible and
+   tappable without hunting for it mid-scroll. */
 #shipyard-panel {
   background: #16283b;
   border: 2px solid #3a5a78;
   border-radius: 14px;
   padding: 24px 28px;
   width: min(90vw, 420px);
+  /* A flat vh percentage (e.g. 90vh) caps the panel below its natural
+     content height (~764px) even on desktop where it already fit inside
+     an 800px viewport with room to spare — that forced an unwanted
+     scrollbar there. A small fixed top/bottom gutter instead: only engage
+     the cap (and #shipyard-scroll's scrolling) where the viewport is
+     actually too short, which is exactly the phone case this exists for. */
+  max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
   color: #fff;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
@@ -234,6 +249,18 @@ body {
   font-size: 24px;
   text-align: center;
   color: #ffd27a;
+  flex: 0 0 auto;
+}
+
+#shipyard-scroll {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  /* Allow the flex child to shrink below its content height so overflow-y
+     actually kicks in instead of the flex item stretching the panel. */
+  min-height: 0;
+  /* Small buffer so the last row's border isn't flush against the scroll
+     edge / the fixed close button below. */
+  padding-bottom: 2px;
 }
 
 .upgrade-row {
@@ -393,6 +420,7 @@ body {
 
 #shipyard-close {
   margin-top: 18px;
+  flex: 0 0 auto;
   width: 100%;
   padding: 12px;
   border-radius: 8px;

@@ -41,6 +41,18 @@ export class HUD {
       this.hideShipyard();
       this.onShipyardClose?.();
     });
+
+    // Keyboard-independent-of-touch safety net: Escape closes the shipyard,
+    // mirroring Chat's Escape-to-cancel. On a tall panel that scrolls (small
+    // phone viewports) this is the only way to close without hunting for the
+    // "Set Sail" button, and it costs nothing on desktop where the panel
+    // already fits.
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isShipyardOpen()) {
+        this.hideShipyard();
+        this.onShipyardClose?.();
+      }
+    });
   }
 
   setHealth(current: number, max: number) {

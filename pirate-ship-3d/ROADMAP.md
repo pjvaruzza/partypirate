@@ -166,6 +166,41 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   safely needs a real layout treatment (naively growing all three risks
   colliding with the health-bar/gold-counter cluster at 375px width) that
   wasn't feasible to verify cleanly in the same pass.
+- [x] **Shipyard soft-lock regression fix (S):** a `qa-verify` pass over the
+  combined output of three specialists (including the mobile touch-target
+  pass above) caught a real bug the `.buy-btn` 44px bump introduced: on
+  short phone viewports the 6 upgrade rows + cannon builder now needed
+  ~764px, taller than `#shipyard-panel` (uncapped, no scroll) could show —
+  confirmed reproducing the exact regression via Playwright at
+  `devices['iPhone 8']` (375×667): panel `y=-64.19, h=795.4`,
+  `elementFromPoint` at the "Set Sail" button's center returned `null`.
+  Movement/fire are suppressed the whole time `hud.isShipyardOpen()` is
+  true, so this was a genuine soft-lock with no way out on phone. Fixed
+  with two changes: (1) restructured `#shipyard-panel` into a flex column
+  — `<h2>` and the `#shipyard-close` "Set Sail" button now live outside a
+  new `#shipyard-scroll` wrapper around the upgrade rows and cannon
+  builder, so the close button is always visible and tappable without
+  hunting for it mid-scroll, rather than sitting at the bottom of scrollable
+  content or relying on `position: sticky` quirks. `#shipyard-panel` caps
+  at `max-height: calc(100vh - 32px - safe-area insets)` with
+  `#shipyard-scroll { overflow-y: auto }`; a flat `90vh`-style cap was
+  tried first and rejected — it forced an unwanted scrollbar even on the
+  1280×800 desktop viewport, where the panel already fit at 764px inside
+  an 800px screen, because 90% of 800 is only 720. The fixed-gutter
+  approach only engages scrolling where the viewport is actually too
+  short. (2) Added an Escape-key handler to `HUD` (`onShipyardClose` fires,
+  mirroring how `Chat` already closes on Escape) as a keyboard-independent
+  safety net regardless of the scroll fix — costs nothing on desktop,
+  guarantees a way out on any device with a keyboard even if a future
+  layout change reintroduces overflow. Verified: `devices['iPhone 13']`
+  (390×664, panel h=632, fits) and `devices['iPhone 8']` (375×667, panel
+  h=635, fits, the stricter case) both show the panel now within viewport
+  bounds with a real Playwright `tap()` on "Set Sail" closing the shipyard;
+  Escape also closes it on iPhone 8. Desktop (1280×800) re-confirmed
+  unchanged at its natural 764px height — no scrollbar, no layout shift.
+  The Starboard cannon-slot grid fix from the prior pass was re-verified
+  intact (bounding-rect + `elementFromPoint` on the Starboard `+` button)
+  at all three viewports.
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
   (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
   other ships as color-coded blips (blue players, red bots, brighter
