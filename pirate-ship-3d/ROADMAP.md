@@ -203,6 +203,39 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   `scale` in `syncVisual` and retuning the constant so exposed freeboard is
   roughly half the hull's total vertical extent across all classes, not
   just the one scale it happened to be tuned against originally.
+- [x] **Island self-shadow smear (S):** a follow-up "still seems pretty bad"
+  complaint about overall graphics quality was never root-caused with a
+  specific fix, so this pass was a genuinely fresh critical audit —
+  screenshots first (broadside, wide sky/water/lighting, island close-up,
+  gameplay chase-cam, at both a 1280×800 desktop and a 390×844 phone
+  viewport), reviewed like real dailies before touching anything, rather
+  than assuming prior work was already good enough. The clearest, most
+  consistent problem across those screenshots: every island showed a large,
+  soft-edged dark blob smeared diagonally across its slope (and spilling
+  onto the sand shelf below it) from many camera/sun angles — pixel-cropped
+  the screenshots to confirm it wasn't texture noise. Root cause: hills in
+  `World.ts`'s `buildHillMesh` have real geometric relief (the
+  `relief` calc's low-frequency ridge/gully octaves, amplitude up to ~15%
+  of `hillRadius` — several world units on a home-port-sized island), large
+  and smooth enough to cast a genuine self-shadow via the directional
+  light's shadow map, but the shadow map (2048px, `PCFSoftShadowMap`)
+  renders that low-frequency bump as one big soft binary-occlusion blob
+  rather than believable small-scale terrain shading — it reads as a dirt
+  stain, not form. Fixed by setting `castShadow = false` on the hill mesh
+  (kept `receiveShadow = true`, so ships/masts sailing past still shadow the
+  island correctly); the vertex-color height gradient plus normal-based
+  Lambertian shading from `computeVertexNormals()` already sells the hill's
+  roundness without the self-shadow pass. Verified by re-shooting the exact
+  camera angle that showed the worst smear before/after — confirmed gone,
+  replaced by a smooth, natural-reading light-to-dark gradient — plus a
+  final unrelated-angle sanity screenshot to confirm no regression. Side
+  benefit: one fewer mesh in the shadow depth pass per island, a small
+  perf win, not just a wash. Other candidates checked and ruled out this
+  pass: cannon/splash/hit particle effects in `Effects.ts` (simple but not
+  glaringly cheap — small additive-blended spheres read fine at gameplay
+  scale), cloud quality in `Sky.ts` (held up under close inspection, no
+  fix needed), hull/island material response under lighting (roughness/
+  color read as intended, not the standout issue).
 - [x] **Water shading (S):** the ocean was fully unlit — one flat color band
   regardless of light or camera angle, the single biggest "cheap" surface
   in the scene since it's visible almost 100% of the time. Now computes an

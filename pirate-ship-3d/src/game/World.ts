@@ -94,7 +94,15 @@ function buildHillMesh(
   const mesh = new THREE.Mesh(geo, mat);
   mesh.scale.y = hillHeight / hillRadius;
   mesh.position.y = baseY;
-  mesh.castShadow = true;
+  // Deliberately NOT castShadow: the hill's own broad ridge/gully relief
+  // (the low-frequency terms in the `relief` calc above) is large enough
+  // relative to hillRadius to self-shadow, and a directional light's shadow
+  // map renders that as one big soft dark smear across the slope — it reads
+  // as a dirt stain, not terrain form, because the shadow is a flat binary
+  // occluder test blurred by PCF, not a gradient. The vertex-color height
+  // gradient plus normal-based diffuse lighting already sells the hill's
+  // roundness without it. Still receives shadows (from ships, masts, etc
+  // passing nearby) via receiveShadow below.
   mesh.receiveShadow = true;
   return mesh;
 }
