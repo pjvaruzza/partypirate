@@ -56,3 +56,14 @@ npm run build
 
 Builds the static client to `dist/`. You still need `npm run server` running
 somewhere reachable for the client to connect to.
+
+## Specialist agents
+
+For focused improvement work (graphics, mobile performance, gameplay
+balance, touch UX, audio), this repo defines seven on-demand Claude Code
+subagents under `.claude/agents/` — `art-director`, `mobile-perf`,
+`gameplay-designer`, `mobile-ux`, `sound-design`, `qa-verify`, and
+`producer` (a swarm orchestrator for initiatives spanning several of the
+above). Every one of them is invoked explicitly by name; none trigger on
+their own. See `AGENT_NETWORK_PRD.md` for the full design — roles,
+boundaries, mobile-first bar, and how they hand work to each other.
