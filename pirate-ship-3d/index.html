@@ -27,6 +27,7 @@
         <div id="hud-top-right">
           <div id="ship-name">Sea Sprite</div>
           <button id="chat-toggle-btn" title="Chat">💬</button>
+          <button id="help-btn" title="How to play">❓</button>
           <button id="mute-btn" title="Mute/unmute sound">🔊</button>
         </div>
         <div id="message-banner"></div>
@@ -106,6 +107,30 @@
             </div>
           </div>
           <button id="shipyard-close">Set Sail</button>
+        </div>
+      </div>
+
+      <div id="tutorial" class="hidden">
+        <div id="tutorial-panel">
+          <h2>Ahoy, Captain!</h2>
+          <ul class="tutorial-tips">
+            <li>
+              <strong>Steer:</strong>
+              <span class="desktop-hint">WASD or the arrow keys</span><span class="touch-hint">the joystick, bottom-left</span>
+              to sail, hold <span class="desktop-hint">Shift</span><span class="touch-hint">BOOST</span> for a burst of speed.
+            </li>
+            <li>
+              <strong>Fight:</strong>
+              <span class="desktop-hint">Space</span><span class="touch-hint">FIRE</span>
+              to broadside — pull up alongside an enemy so your port/starboard cannons bear. Ramming a bot at
+              speed damages you both, too.
+            </li>
+            <li><strong>Shipyard:</strong> sail back to home port (the gold marker on your minimap) to upgrade your ship and place cannons.</li>
+            <li><strong>Treasure:</strong> sinking enemies sometimes drops a torn map — follow the glowing beacon to dig it up.</li>
+            <li><strong>Heat:</strong> sinking ships raises your wanted meter. Let it cool at port before it draws a hunter your way.</li>
+            <li><strong>Chat:</strong> press Enter or tap 💬 to talk to other captains.</li>
+          </ul>
+          <button id="tutorial-close">Set Sail</button>
         </div>
       </div>
 

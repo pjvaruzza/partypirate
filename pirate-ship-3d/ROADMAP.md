@@ -112,8 +112,16 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   zenith gradient matched to the scene fog, a sun disc and scatter glow
   placed at the actual `DirectionalLight` direction, and a drifting
   procedural cloud layer. Follows the camera so it can't be sailed out of.
-- **Onboarding (S):** a short first-run tutorial overlay explaining controls
-  and the cannon builder instead of dropping the player in cold.
+- [x] **Onboarding (S):** a `src/ui/Tutorial.ts` overlay covers steering/
+  boost, broadsiding + ramming, the shipyard, treasure maps, heat, and chat
+  — previously every one of those systems had zero in-game explanation.
+  Shown automatically the first time a browser joins (tracked via a
+  `localStorage` flag — a UI preference, not game progress, so it doesn't
+  touch the server-authoritative save model), reopenable anytime via a ❓
+  button next to mute/chat. Control hints swap between keyboard and touch
+  wording via the same `(hover: none), (pointer: coarse)` media query
+  already used to hide the touch controls on desktop, so the tips actually
+  match the controls the player has in front of them.
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
   (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
   other ships as color-coded blips (blue players, red bots, brighter
@@ -205,12 +213,11 @@ this first cut:
 ---
 
 **Suggested next session's focus:** a user pass flagged gameplay quality
-directly — combat impact/weight, repetitiveness, and cheap visuals are now
-all addressed (hit feedback pass + ramming + lit water/sky + real hull and
-island geometry). Day-night cycle explicitly deferred per the user. Next,
-roughly in order: (1) onboarding tutorial — several systems now exist with
-no in-game explanation, (2) PvP with an opt-in toggle once ready to defend
-the co-op loop from griefing, (3) mobile hosting/testing pass (tunnel for
-quick testing, or real `wss://` hosting for anything durable) — the touch
-controls exist but the newer UI has never been checked on a real mobile
-viewport.
+directly — combat impact/weight, repetitiveness, cheap visuals, and now
+onboarding are all addressed (hit feedback pass + ramming + lit water/sky +
+real hull/island geometry + first-run tutorial). Day-night cycle explicitly
+deferred per the user. Next, roughly in order: (1) PvP with an opt-in
+toggle once ready to defend the co-op loop from griefing, (2) mobile
+hosting/testing pass (tunnel for quick testing, or real `wss://` hosting
+for anything durable) — the touch controls exist but the newer UI has never
+been checked on a real mobile viewport.

@@ -11,6 +11,7 @@ import { DamageNumbers } from './game/DamageNumbers';
 import { SoundManager } from './game/Audio';
 import { HUD } from './ui/HUD';
 import { Chat } from './ui/Chat';
+import { Tutorial } from './ui/Tutorial';
 import { Minimap } from './ui/Minimap';
 import { Network } from './net/Network';
 import { SHIP_CLASS_SCALE, type CannonballSnapshot, type CrateInfo, type GameEvent, type ShipSnapshot } from './shared/protocol';
@@ -100,6 +101,7 @@ muteBtn?.addEventListener('click', () => {
 // --- HUD / chat / network ----------------------------------------------------
 const hud = new HUD();
 const chat = new Chat();
+const tutorial = new Tutorial();
 const minimap = new Minimap();
 const network = new Network();
 chat.onSend = (text) => network.sendChat(text);
@@ -278,6 +280,7 @@ network.onWelcome = (msg) => {
   world = new World(scene, msg.islands);
   ocean.setIslands(msg.islands);
   joinScreen.classList.add('hidden');
+  tutorial.showIfFirstVisit();
 };
 network.onDisconnect = () => {
   clearWorldState();
@@ -409,7 +412,7 @@ function animate() {
   let myShip: Ship | undefined;
 
   if (network.yourId && world) {
-    const suppressInput = hud.isShipyardOpen() || chat.isOpen();
+    const suppressInput = hud.isShipyardOpen() || chat.isOpen() || tutorial.isOpen();
     const activeInput = suppressInput ? { turn: 0, throttle: 0, fire: false, boost: false } : input.state;
     network.sendInput(activeInput);
 

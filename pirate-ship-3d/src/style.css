@@ -104,7 +104,8 @@ body {
 }
 
 #mute-btn,
-#chat-toggle-btn {
+#chat-toggle-btn,
+#help-btn {
   pointer-events: auto;
   border: none;
   background: transparent;
@@ -143,7 +144,8 @@ body {
 }
 
 #shipyard,
-#join-screen {
+#join-screen,
+#tutorial {
   position: absolute;
   inset: 0;
   background: rgba(4, 10, 18, 0.72);
@@ -155,7 +157,8 @@ body {
 }
 
 #shipyard.hidden,
-#join-screen.hidden {
+#join-screen.hidden,
+#tutorial.hidden {
   display: none;
 }
 
@@ -367,6 +370,72 @@ body {
   font-weight: 700;
   font-size: 16px;
   cursor: pointer;
+}
+
+#tutorial-panel {
+  background: #16283b;
+  border: 2px solid #3a5a78;
+  border-radius: 14px;
+  padding: 24px 28px;
+  width: min(90vw, 440px);
+  color: #fff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+#tutorial-panel h2 {
+  margin: 0 0 16px;
+  font-size: 24px;
+  text-align: center;
+  color: #ffd27a;
+}
+
+.tutorial-tips {
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tutorial-tips li {
+  font-size: 14px;
+  line-height: 1.5;
+  opacity: 0.9;
+}
+
+.tutorial-tips strong {
+  color: #ffd27a;
+}
+
+#tutorial-close {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background: #3ea36b;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* Desktop shows keyboard hints by default; swapped for touch hints on
+   coarse-pointer/no-hover devices — the mirror image of the media query
+   below that hides #touch-controls on desktop. */
+.desktop-hint {
+  display: inline;
+}
+.touch-hint {
+  display: none;
+}
+@media (hover: none), (pointer: coarse) {
+  .desktop-hint {
+    display: none;
+  }
+  .touch-hint {
+    display: inline;
+  }
 }
 
 #port-btn {
