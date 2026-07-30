@@ -65,10 +65,12 @@ scene.add(new THREE.HemisphereLight(0xdfefff, 0x1c3d2a, 0.5));
 // --- ocean ------------------------------------------------------------------
 // Sized to comfortably exceed the fog distance (950) in every direction from
 // the player rather than to span the whole world — the mesh follows the
-// player, so it only ever needs to cover what's actually visible. The higher
-// segment count keeps vertex spacing fine enough that the rendered surface
-// matches getHeightAt() closely, which is what ships float on.
-const ocean = new Ocean(2200, 256, sun.position);
+// player, so it only ever needs to cover what's actually visible. Ocean's
+// constructor now packs vertex density toward the mesh centre (see WARP_POWER
+// there), so 128 segments lands finer under the ship than the old uniform
+// 256 did, while roughly halving total triangles by not wasting density on
+// the outer band beyond the fog cutoff.
+const ocean = new Ocean(2200, 128, sun.position);
 scene.add(ocean.mesh);
 
 // --- sky --------------------------------------------------------------------

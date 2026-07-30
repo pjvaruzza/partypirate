@@ -194,8 +194,33 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   the waterline), matching the technique `buildHillMesh` already used;
   previously the shelf was one flat material color. Verified with no
   shader compile errors at both a desktop and iPhone-emulated viewport.
-- **Performance pass for low-end mobile (S/M):** LOD for distant islands/
-  ocean segments, cheaper shadows, frame budget testing on a throttled device.
+- [x] **Ocean LOD for low-end mobile (S):** profiled with Playwright at an
+  iPhone-13 viewport (`renderer.info` + rAF frame-delta timing over 180
+  frames). The ocean mesh was the dominant cost in the scene by a wide
+  margin — 131,072 of the scene's 171,239 triangles (79%) — because
+  `PlaneGeometry(2200, 256, 256)` tessellates uniformly all the way to its
+  edges, but the mesh follows the player and only needs to reach the fog
+  cutoff (`scene.fog` ends at 950); the outer band past that is fully
+  fog-occluded yet cost exactly as many vertices/triangles as the water
+  right under the ship. Fixed in `Ocean.ts` by re-mapping each vertex's
+  offset from the mesh centre through a power curve
+  (`sign(u)*|u|^1.8`) after building the same `PlaneGeometry` — same
+  topology and triangle/vertex count, no seams to stitch, just packed
+  toward the centre where detail is actually visible and coarser toward
+  the edges where it never was. Paired with dropping segments 256 → 128 in
+  `main.ts`, which nets out finer resolution under the ship than the old
+  uniform grid (~0.6 vs 8.6 world units at dead centre) while roughly
+  halving the vertex count. `followTarget`'s position-snap grid size now
+  tracks the new finest cell (~0.6 units) instead of the old uniform one,
+  so the snap-to-grid that stops waves "swimming" as the mesh re-centres
+  is unaffected. Result: scene triangles 171,239 → 65,237 (-62%), draw
+  calls 141 → 91, avg frame time (unthrottled, iPhone-13 viewport, this
+  sandbox's software-rendered GPU) 372ms → 314ms (-16%). Verified no
+  visible change via before/after screenshots at both the default
+  near-ship camera and after sailing out to open water for a clear
+  horizon view — the difference is only in the numbers. Bundle size
+  unaffected (596.52kB → 596.74kB, noise from a few extra lines).
+  Still open: island LOD and shadow-map cost untouched by this pass.
 - [x] **Save to an account instead of localStorage (M):** superseded by the
   multiplayer server below — progress now lives in
   `server/data/players.json`, keyed by captain name, instead of the

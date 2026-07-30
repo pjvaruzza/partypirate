@@ -124,17 +124,47 @@ const fragmentShader = /* glsl */ `
   }
 `;
 
+/** How aggressively vertex density falls off away from the mesh centre — see
+ * the "uniform PlaneGeometry grid" comment in the constructor for the full
+ * rationale. Module-level rather than a constructor param since it's a
+ * tuning constant, not something callers should vary per instance. */
+const WARP_POWER = 1.8;
+
 export class Ocean {
   readonly mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
 
-  /** World units between adjacent vertices — the mesh is snapped to this grid
-   * when following the player so the surface never crawls or swims. */
+  /** World units between the two vertices nearest the mesh centre — the
+   * finest gap the warped grid produces. The mesh is snapped to this grid
+   * when following the player so the surface never crawls or swims; using
+   * the finest gap (rather than an average) keeps that snap imperceptible
+   * right under the ship, which is the only place the eye can tell. */
   private readonly cellSize: number;
 
   constructor(size = 1800, segments = 256, sunDirection: THREE.Vector3 = new THREE.Vector3(120, 200, 80)) {
-    this.cellSize = size / segments;
+    const half = size / 2;
     const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+
+    // The uniform PlaneGeometry grid spends the same vertex density on the
+    // outer edge (well past the fog-out distance of 950, where the surface
+    // is fully hidden) as it does right under the player's ship, where wave
+    // detail actually matters. Re-map each vertex's distance from the mesh
+    // centre through a power curve (u -> sign(u)*|u|^WARP_POWER) instead of
+    // leaving it linear: same vertex/triangle count and topology (no seams
+    // to stitch, still one PlaneGeometry), just packed densely near the
+    // centre and coarser toward the edges, which is where they belong.
+    const posAttr = geometry.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      const ux = posAttr.getX(i) / half;
+      const uy = posAttr.getY(i) / half;
+      posAttr.setX(i, Math.sign(ux) * Math.pow(Math.abs(ux), WARP_POWER) * half);
+      posAttr.setY(i, Math.sign(uy) * Math.pow(Math.abs(uy), WARP_POWER) * half);
+    }
+    posAttr.needsUpdate = true;
+
+    const duNormalized = 1 / (segments / 2);
+    this.cellSize = half * Math.pow(duNormalized, WARP_POWER);
+
     this.material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
