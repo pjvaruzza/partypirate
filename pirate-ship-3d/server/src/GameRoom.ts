@@ -6,6 +6,7 @@ import {
   cannonReload,
   integrate,
   maxHealthFor,
+  topSpeed,
   type ShipBody,
   type ShipStats,
 } from './ShipSim';
@@ -18,6 +19,7 @@ import {
   SHIP_CLASS_ORDER,
   SHIP_CLASS_SCALE,
   SIDE_SLOT_MAX,
+  type AmmoType,
   type CannonLoadout,
   type CannonSide,
   type EconomySnapshot,
@@ -85,6 +87,23 @@ const RIVAL_FIRE_WINDOW_DEG = 48;
 const RIVAL_GOLD_MULT = 3;
 const RIVAL_SAIL_BONUS = 1.5;
 
+/** Ammo types are trade-offs, not upgrades — each deals less base damage
+ * than round shot in exchange for a situational effect, so round shot stays
+ * the correct default rather than something special ammo strictly beats. */
+const CHAIN_DAMAGE_MULT = 0.5;
+const CHAIN_RELOAD_MULT = 1.3;
+const CHAIN_DISABLE_DURATION = 3.5;
+const CHAIN_SPEED_MULT = 0.35;
+/** ball.age at impact stands in for "how close was the target when fired" —
+ * grape is a close-range shotgun blast, weak at range. */
+const GRAPE_CLOSE_AGE = 0.5;
+const GRAPE_CLOSE_DAMAGE_MULT = 1.6;
+const GRAPE_FAR_DAMAGE_MULT = 0.6;
+const FIRE_INITIAL_DAMAGE_MULT = 0.4;
+const FIRE_DOT_TOTAL_MULT = 0.7;
+const FIRE_DURATION = 4;
+const FIRE_TICK_INTERVAL = 1;
+
 const HEAT_MAX = 100;
 const HEAT_PER_GOLD_EARNED = 0.15;
 const HEAT_DECAY_PER_SEC = 1.2;
@@ -128,6 +147,19 @@ interface BaseShip {
   /** Prevents ram damage from re-triggering every tick while two hulls stay
    * in contact — see resolveRamming. */
   ramCooldown: number;
+  /** Chain-shot rigging damage: sail speed is capped while this counts down —
+   * see CHAIN_* constants and updateStatusEffects. */
+  sailDisableTimer: number;
+  /** Fire-shot ignition: ticks burnDamagePerTick every burnTickTimer seconds
+   * until this reaches 0 — see FIRE_* constants and updateStatusEffects. An
+   * integer tick counter rather than a duration so the last tick can't get
+   * lost to float drift between two independently-decrementing timers. */
+  burnTicksRemaining: number;
+  burnTickTimer: number;
+  burnDamagePerTick: number;
+  /** Who lit the fire, so a burn-tick kill still credits gold/heat like a
+   * normal cannonball kill — see killShip. */
+  burnOwnerId: string | null;
 }
 
 export interface PlayerShip extends BaseShip {
@@ -193,6 +225,11 @@ export class GameRoom {
       maxHealth: maxHealthFor(stats),
       cannonCooldown: 0,
       ramCooldown: 0,
+      sailDisableTimer: 0,
+      burnTicksRemaining: 0,
+      burnTickTimer: 0,
+      burnDamagePerTick: 0,
+      burnOwnerId: null,
       alive: true,
       deathTimer: 0,
       socket,
@@ -268,6 +305,11 @@ export class GameRoom {
       maxHealth: maxHealthFor(stats),
       cannonCooldown: 0,
       ramCooldown: 0,
+      sailDisableTimer: 0,
+      burnTicksRemaining: 0,
+      burnTickTimer: 0,
+      burnDamagePerTick: 0,
+      burnOwnerId: null,
       alive: true,
       deathTimer: 0,
       ai: {
@@ -304,6 +346,11 @@ export class GameRoom {
       maxHealth: maxHealthFor(stats) * 1.8,
       cannonCooldown: 0,
       ramCooldown: 0,
+      sailDisableTimer: 0,
+      burnTicksRemaining: 0,
+      burnTickTimer: 0,
+      burnDamagePerTick: 0,
+      burnOwnerId: null,
       alive: true,
       deathTimer: 0,
       ai: { state: 'patrol', patrolX: x, patrolZ: z },
@@ -352,6 +399,11 @@ export class GameRoom {
       maxHealth: baseHealth * RIVAL_HEALTH_MULT,
       cannonCooldown: 0,
       ramCooldown: 0,
+      sailDisableTimer: 0,
+      burnTicksRemaining: 0,
+      burnTickTimer: 0,
+      burnDamagePerTick: 0,
+      burnOwnerId: null,
       alive: true,
       deathTimer: 0,
       ai: { state: 'patrol', patrolX: x, patrolZ: z },
@@ -441,7 +493,7 @@ export class GameRoom {
     };
   }
 
-  private fireShip(ship: AnyShip) {
+  private fireShip(ship: AnyShip, ammoType: AmmoType = 'round') {
     const scale = ship.isBot ? 0.9 : SHIP_CLASS_SCALE[ship.economy.shipClass];
     const balls = spawnCannonballs(
       ship.id,
@@ -452,6 +504,7 @@ export class GameRoom {
       scale,
       ship.loadout,
       cannonDamage(ship.stats),
+      ammoType,
     );
     if (balls.length === 0) return;
     this.cannonballs.push(...balls);
@@ -478,6 +531,10 @@ export class GameRoom {
     }
 
     applyControls(ship.body, ship.stats, input.turn, input.throttle, dt, boosting);
+    if (ship.sailDisableTimer > 0) {
+      const cap = topSpeed(ship.stats) * CHAIN_SPEED_MULT;
+      ship.body.speed = Math.max(-cap, Math.min(cap, ship.body.speed));
+    }
     const prevX = ship.body.x;
     const prevZ = ship.body.z;
     integrate(ship.body, dt);
@@ -485,8 +542,9 @@ export class GameRoom {
 
     ship.cannonCooldown = Math.max(0, ship.cannonCooldown - dt);
     if (input.fire && ship.cannonCooldown <= 0) {
-      this.fireShip(ship);
-      ship.cannonCooldown = cannonReload(ship.stats);
+      const ammoType = input.ammoType ?? 'round';
+      this.fireShip(ship, ammoType);
+      ship.cannonCooldown = cannonReload(ship.stats) * (ammoType === 'chain' ? CHAIN_RELOAD_MULT : 1);
     }
   }
 
@@ -518,6 +576,10 @@ export class GameRoom {
     const { turn, throttle, wantsFire } = updateBotAI(bot.ai, bot.body, targetX, targetZ, nearest !== null, fireWindowDeg);
 
     applyControls(bot.body, bot.stats, turn, throttle, dt, false);
+    if (bot.sailDisableTimer > 0) {
+      const cap = topSpeed(bot.stats) * CHAIN_SPEED_MULT;
+      bot.body.speed = Math.max(-cap, Math.min(cap, bot.body.speed));
+    }
     const prevX = bot.body.x;
     const prevZ = bot.body.z;
     integrate(bot.body, dt);
@@ -604,6 +666,32 @@ export class GameRoom {
     }
   }
 
+  /** Applies each ammo type's trade-off in one place: less base damage than
+   * round shot, in exchange for the situational effect below. */
+  private ammoDamage(ball: CannonballState): number {
+    switch (ball.ammoType) {
+      case 'chain':
+        return ball.damage * CHAIN_DAMAGE_MULT;
+      case 'grape':
+        return ball.damage * (ball.age < GRAPE_CLOSE_AGE ? GRAPE_CLOSE_DAMAGE_MULT : GRAPE_FAR_DAMAGE_MULT);
+      case 'fire':
+        return ball.damage * FIRE_INITIAL_DAMAGE_MULT;
+      default:
+        return ball.damage;
+    }
+  }
+
+  private applyAmmoEffect(ball: CannonballState, ship: AnyShip) {
+    if (ball.ammoType === 'chain') {
+      ship.sailDisableTimer = CHAIN_DISABLE_DURATION;
+    } else if (ball.ammoType === 'fire') {
+      ship.burnTicksRemaining = FIRE_DURATION / FIRE_TICK_INTERVAL;
+      ship.burnTickTimer = FIRE_TICK_INTERVAL;
+      ship.burnDamagePerTick = (ball.damage * FIRE_DOT_TOTAL_MULT) / (FIRE_DURATION / FIRE_TICK_INTERVAL);
+      ship.burnOwnerId = ball.ownerId;
+    }
+  }
+
   private resolveCombat() {
     for (const ball of this.cannonballs) {
       if (!ball.alive) continue;
@@ -612,7 +700,9 @@ export class GameRoom {
         const hitRadius = HIT_RADIUS * (ship.isBot ? 0.9 : SHIP_CLASS_SCALE[ship.economy.shipClass]);
         if (Math.hypot(ship.body.x - ball.x, ship.body.z - ball.z) >= hitRadius) continue;
 
-        ship.health = Math.max(0, ship.health - ball.damage);
+        const damage = this.ammoDamage(ball);
+        ship.health = Math.max(0, ship.health - damage);
+        this.applyAmmoEffect(ball, ship);
         ball.alive = false;
         this.events.push({
           type: 'hit',
@@ -621,7 +711,7 @@ export class GameRoom {
           z: ball.z,
           targetId: ship.id,
           ownerId: ball.ownerId,
-          damage: ball.damage,
+          damage,
         });
 
         if (ship.health <= 0) this.killShip(ship, this.ships.get(ball.ownerId));
@@ -775,6 +865,11 @@ export class GameRoom {
       maxHealth: maxHealthFor(stats),
       cannonCooldown: 0,
       ramCooldown: 0,
+      sailDisableTimer: 0,
+      burnTicksRemaining: 0,
+      burnTickTimer: 0,
+      burnDamagePerTick: 0,
+      burnOwnerId: null,
       alive: true,
       deathTimer: 0,
       ai: { state: 'patrol', patrolX: x, patrolZ: z },
@@ -799,6 +894,33 @@ export class GameRoom {
       if (ship.heat > 0 && Math.random() < (ship.heat / HEAT_MAX) * HUNTER_SPAWN_CHANCE_AT_MAX_HEAT) {
         this.spawnHunterShip(ship);
       }
+    }
+  }
+
+  /** Counts down sail-disable (see updatePlayer/updateBot's speed cap) and
+   * ticks burn damage — both set by applyAmmoEffect on a chain/fire hit. A
+   * burn-tick kill credits the ship that lit the fire, same as a direct hit. */
+  private updateStatusEffects(ship: AnyShip, dt: number) {
+    if (ship.sailDisableTimer > 0) ship.sailDisableTimer = Math.max(0, ship.sailDisableTimer - dt);
+    if (ship.burnTicksRemaining <= 0) return;
+
+    ship.burnTickTimer -= dt;
+    if (ship.burnTickTimer > 0) return;
+    ship.burnTickTimer += FIRE_TICK_INTERVAL;
+    ship.burnTicksRemaining -= 1;
+
+    ship.health = Math.max(0, ship.health - ship.burnDamagePerTick);
+    this.events.push({
+      type: 'hit',
+      x: ship.body.x,
+      y: 1.2,
+      z: ship.body.z,
+      targetId: ship.id,
+      ownerId: ship.burnOwnerId ?? ship.id,
+      damage: ship.burnDamagePerTick,
+    });
+    if (ship.health <= 0) {
+      this.killShip(ship, ship.burnOwnerId ? this.ships.get(ship.burnOwnerId) : undefined);
     }
   }
 
@@ -837,6 +959,7 @@ export class GameRoom {
 
     for (const ship of [...this.ships.values()]) {
       if (ship.ramCooldown > 0) ship.ramCooldown = Math.max(0, ship.ramCooldown - dt);
+      if (ship.alive) this.updateStatusEffects(ship, dt);
       if (!ship.alive) {
         ship.deathTimer += dt;
         if (!ship.isBot && ship.deathTimer > PLAYER_RESPAWN_DELAY) this.respawnPlayer(ship);

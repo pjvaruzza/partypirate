@@ -583,3 +583,44 @@ body {
     display: none;
   }
 }
+
+/* Not nested inside #touch-controls — ammo selection is useful on desktop
+   too (mouse click as well as the 1-4 keybinds), so it stays visible there. */
+#ammo-selector {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.ammo-btn {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(20, 15, 10, 0.6);
+  color: #fff;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ammo-btn.active {
+  border-color: #ffd27a;
+  background: rgba(255, 210, 122, 0.3);
+}
+
+.ammo-key {
+  position: absolute;
+  bottom: -15px;
+  font-size: 10px;
+  opacity: 0.65;
+}

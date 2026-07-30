@@ -92,8 +92,16 @@ function broadcast() {
     maxHealth: s.maxHealth,
     loadout: s.loadout,
     alive: s.alive,
+    sailDisabled: s.sailDisableTimer > 0,
+    burning: s.burnTicksRemaining > 0,
   }));
-  const cannonballsSnapshot: CannonballSnapshot[] = room.cannonballs.map((b) => ({ id: b.id, x: b.x, y: b.y, z: b.z }));
+  const cannonballsSnapshot: CannonballSnapshot[] = room.cannonballs.map((b) => ({
+    id: b.id,
+    x: b.x,
+    y: b.y,
+    z: b.z,
+    ammoType: b.ammoType,
+  }));
   const cratesSnapshot: CrateInfo[] = room.crates
     .filter((c) => !c.collected)
     .map((c) => ({ id: c.id, x: c.x, z: c.z, value: c.value }));

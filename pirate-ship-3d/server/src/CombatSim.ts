@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { CannonLoadout, CannonSide } from '../../src/shared/protocol';
+import type { AmmoType, CannonLoadout, CannonSide } from '../../src/shared/protocol';
 
 /** Plain-number port of Ship.ts's cannonMountOffsets — must stay in lockstep
  * with the client's copy so muzzle flashes line up with where the cannonball
@@ -34,6 +34,7 @@ export interface CannonballState {
   age: number;
   alive: boolean;
   hitWater: boolean;
+  ammoType: AmmoType;
 }
 
 const GRAVITY = 9.8;
@@ -48,6 +49,7 @@ export function spawnCannonballs(
   scale: number,
   loadout: CannonLoadout,
   damage: number,
+  ammoType: AmmoType = 'round',
 ): CannonballState[] {
   const forwardX = Math.sin(heading);
   const forwardZ = Math.cos(heading);
@@ -77,6 +79,7 @@ export function spawnCannonballs(
         age: 0,
         alive: true,
         hitWater: false,
+        ammoType,
       });
     }
   });

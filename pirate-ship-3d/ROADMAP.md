@@ -38,10 +38,26 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
 
 ## Tier 2 — Combat depth & variety
 
-- **More powerup/ammo types (M):** chain shot (disables sails temporarily),
-  grapeshot (extra damage vs. crew/hull at close range), fire shot (ignites
-  sails, damage over time) — gives loadout choices beyond just "how many
-  cannons per side."
+- [x] **More powerup/ammo types (M):** four ammo types, switchable anytime
+  (free, no resource pool) via the bottom-center selector or keys 1-4: round
+  shot (full damage, the default), chain shot (half damage, but fouls the
+  target's rigging — speed capped to 35% of top speed for 3.5s), grapeshot
+  (1.6x damage at close range, 0.6x at range — `ball.age` at impact stands in
+  for "how close was the target when fired," since a shotgun blast is weak
+  past its spread), fire shot (0.4x initial damage, then an extra 0.7x total
+  spread over 4 ticks of burn damage). Chain shot also reloads 1.3x slower —
+  every type trades base damage for a situational effect, so round shot stays
+  the correct default rather than something strictly worse. Burn DoT ticks
+  off an integer counter (`burnTicksRemaining`), not a second duration timer
+  racing the tick timer — an earlier version lost the last tick to float
+  drift between two independently-decrementing timers when they landed on
+  the same instant; caught by a standalone `GameRoom` test asserting the
+  total burn damage came out to exactly the expected value, not "close to."
+  Client renders both effects: sail darkens while disabled, hull gets a
+  pulsing orange smolder while burning. Bots always fire round shot — no AI
+  complexity added for ammo selection. PvP is still parked pending the
+  opt-in design answer, so all of this is player-vs-bot only for now, same
+  as ramming.
 - [x] **Ramming (S):** driving your hull into a bot at speed (≥3.5 units/s
   relative closing speed) damages both sides, scaled by that closing speed
   (capped at 45) — reuses the same damage-number/hit-stop/shake feedback as
@@ -148,6 +164,17 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   the one below, since the hull's raked, curved stern can't be matched
   exactly by a flat-bottomed box and the mismatch showed as a visible gap.
   Day-night cycle explicitly out of scope per the user.
+  **Follow-up:** a user pass flagged ships still looking "partially
+  submerged" even after the above — root cause was `WATERLINE_OFFSET`, a
+  flat world-space constant applied to every hull regardless of its own
+  scale, so it cut away a much bigger fraction of a small hull's designed
+  freeboard than a big one's (bots at scale 0.9 rode almost gunwale-deep;
+  the player's own scale-1 sloop showed barely a sliver of hull above water
+  — confirmed via close broadside screenshots, not just eyeballing the
+  normal chase-cam view). Fixed by scaling the offset with the hull's own
+  `scale` in `syncVisual` and retuning the constant so exposed freeboard is
+  roughly half the hull's total vertical extent across all classes, not
+  just the one scale it happened to be tuned against originally.
 - [x] **Water shading (S):** the ocean was fully unlit — one flat color band
   regardless of light or camera angle, the single biggest "cheap" surface
   in the scene since it's visible almost 100% of the time. Now computes an

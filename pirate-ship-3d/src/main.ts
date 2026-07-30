@@ -448,11 +448,12 @@ function animate() {
       ship.health = cur.health;
       ship.maxHealth = cur.maxHealth;
       ship.alive = cur.alive;
+      ship.setStatusEffects(cur.sailDisabled, cur.burning);
       if (cur.alive) ship.resetSink();
       else ship.beginSinking();
 
       ship.updateSink(dt);
-      ship.updateHitFlash(dt);
+      ship.updateHitFlash(dt, elapsed);
       const h = ocean.getHeightAt(cur.x, cur.z, elapsed);
       ship.syncVisual(h, elapsed);
 

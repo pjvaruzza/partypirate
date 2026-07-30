@@ -141,6 +141,21 @@
         <input id="chat-input" type="text" maxlength="140" placeholder="Say something… (Enter to send, Esc to cancel)" autocomplete="off" />
       </div>
 
+      <div id="ammo-selector">
+        <button class="ammo-btn active" data-ammo="round" title="Round Shot — full damage, the reliable default">
+          <span class="ammo-icon">⚫</span><span class="ammo-key desktop-hint">1</span>
+        </button>
+        <button class="ammo-btn" data-ammo="chain" title="Chain Shot — less damage, fouls the target's rigging">
+          <span class="ammo-icon">⛓️</span><span class="ammo-key desktop-hint">2</span>
+        </button>
+        <button class="ammo-btn" data-ammo="grape" title="Grapeshot — a close-range shotgun blast, weak at range">
+          <span class="ammo-icon">🍇</span><span class="ammo-key desktop-hint">3</span>
+        </button>
+        <button class="ammo-btn" data-ammo="fire" title="Fire Shot — light weak, but sets the target ablaze">
+          <span class="ammo-icon">🔥</span><span class="ammo-key desktop-hint">4</span>
+        </button>
+      </div>
+
       <div id="touch-controls">
         <div id="joystick-zone">
           <div id="joystick-base"><div id="joystick-knob"></div></div>

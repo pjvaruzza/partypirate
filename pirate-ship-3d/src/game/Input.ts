@@ -1,9 +1,9 @@
-import type { InputState } from '../shared/protocol';
+import { AMMO_TYPE_ORDER, type AmmoType, type InputState } from '../shared/protocol';
 
 export type { InputState };
 
 export class InputManager {
-  readonly state: InputState = { turn: 0, throttle: 0, fire: false, boost: false };
+  readonly state: InputState = { turn: 0, throttle: 0, fire: false, boost: false, ammoType: 'round' };
 
   private keys = new Set<string>();
   private joystickActive = false;
@@ -13,12 +13,34 @@ export class InputManager {
   private touchBoost = false;
 
   constructor() {
-    window.addEventListener('keydown', (e) => this.keys.add(e.key.toLowerCase()));
+    window.addEventListener('keydown', (e) => {
+      this.keys.add(e.key.toLowerCase());
+      const digit = Number(e.key);
+      if (Number.isInteger(digit) && digit >= 1 && digit <= AMMO_TYPE_ORDER.length) {
+        this.setAmmoType(AMMO_TYPE_ORDER[digit - 1]);
+      }
+    });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
 
     this.setupJoystick();
     this.setupButton('fire-btn', 'fire');
     this.setupButton('boost-btn', 'boost');
+    this.setupAmmoSelector();
+  }
+
+  setAmmoType(ammoType: AmmoType) {
+    if (this.state.ammoType === ammoType) return;
+    this.state.ammoType = ammoType;
+    for (const el of document.querySelectorAll('.ammo-btn')) {
+      el.classList.toggle('active', el.getAttribute('data-ammo') === ammoType);
+    }
+  }
+
+  private setupAmmoSelector() {
+    for (const ammoType of AMMO_TYPE_ORDER) {
+      const btn = document.querySelector(`.ammo-btn[data-ammo="${ammoType}"]`);
+      btn?.addEventListener('click', () => this.setAmmoType(ammoType));
+    }
   }
 
   private setupButton(id: string, field: 'fire' | 'boost') {

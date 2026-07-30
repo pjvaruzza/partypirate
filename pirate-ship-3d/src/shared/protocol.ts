@@ -7,7 +7,13 @@ export interface InputState {
   throttle: number;
   fire: boolean;
   boost: boolean;
+  ammoType?: AmmoType;
 }
+
+/** Round shot is the free default; chain and grape are trade-offs (lower
+ * base damage for a situational effect), not strictly-better upgrades. */
+export type AmmoType = 'round' | 'chain' | 'grape' | 'fire';
+export const AMMO_TYPE_ORDER: AmmoType[] = ['round', 'chain', 'grape', 'fire'];
 
 export interface CannonLoadout {
   front: number;
@@ -100,6 +106,10 @@ export interface ShipSnapshot {
   maxHealth: number;
   loadout: CannonLoadout;
   alive: boolean;
+  /** Rigging shot out by chain shot — sail speed is cut until this clears. */
+  sailDisabled: boolean;
+  /** Hull alight from fire shot — ticking damage until this clears. */
+  burning: boolean;
 }
 
 export interface CannonballSnapshot {
@@ -107,6 +117,7 @@ export interface CannonballSnapshot {
   x: number;
   y: number;
   z: number;
+  ammoType: AmmoType;
 }
 
 export interface EconomySnapshot {

@@ -55,8 +55,11 @@ const HULL_FREEBOARD = 0.5;
 const DECK_CAMBER = 0.07;
 /** y=0 in hull-local space is the designed waterline, so the group sits just
  * below the wave surface and the hull is actually *in* the water rather than
- * perched on it showing its keel. */
-const WATERLINE_OFFSET = -0.3;
+ * perched on it showing its keel. Scales with the hull's own scale (applied
+ * in syncVisual) — as a flat world-space offset it used to cut away a much
+ * bigger fraction of a small hull's freeboard than a big one's, so bots
+ * (scale 0.9) rode almost gunwale-deep while galleons barely dipped in. */
+const WATERLINE_OFFSET = -0.08;
 
 /** 0/1/2 = sloop/brigantine/galleon. Previously every class was the exact
  * same hull, scaled — a galleon was just a bigger sloop. This shapes the
@@ -518,6 +521,10 @@ export class Ship {
   private sinking = false;
   private sinkTimer = 0;
   private sinkListDir = 1;
+  private sailMat: THREE.MeshStandardMaterial;
+  private baseSailColor: THREE.Color;
+  private burning = false;
+  private sailDisabled = false;
 
   constructor(
     stats: ShipStats,
@@ -545,6 +552,8 @@ export class Ship {
     this.sailMesh = this.group.getObjectByName('sail') as THREE.Mesh;
     this.hullMesh = this.group.getObjectByName('hull') as THREE.Mesh;
     this.hullMat = this.hullMesh.material as THREE.MeshStandardMaterial;
+    this.sailMat = this.sailMesh.material as THREE.MeshStandardMaterial;
+    this.baseSailColor = this.sailMat.color.clone();
     this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale);
     this.group.add(this.cannonsGroup);
   }
@@ -565,10 +574,24 @@ export class Ship {
     this.hitFlash = 1;
   }
 
-  updateHitFlash(dt: number) {
-    if (this.hitFlash <= 0) return;
-    this.hitFlash = Math.max(0, this.hitFlash - dt * 3);
-    this.hullMat.emissive.setRGB(this.hitFlash, this.hitFlash * 0.85, this.hitFlash * 0.75);
+  /** Chain-shot rigging damage / fire-shot ignition, mirrored from the
+   * server's sailDisabled/burning snapshot fields — sail dims to show it's
+   * fouled, hull gets a smoldering glow so a burning ship reads at a glance. */
+  setStatusEffects(sailDisabled: boolean, burning: boolean) {
+    if (sailDisabled !== this.sailDisabled) {
+      this.sailDisabled = sailDisabled;
+      this.sailMat.color.copy(sailDisabled ? new THREE.Color(0x8a8378) : this.baseSailColor);
+    }
+    this.burning = burning;
+  }
+
+  updateHitFlash(dt: number, time: number) {
+    if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt * 3);
+    const burnGlow = this.burning ? 0.35 + Math.sin(time * 9) * 0.15 : 0;
+    const r = Math.max(this.hitFlash, burnGlow);
+    const g = Math.max(this.hitFlash * 0.85, burnGlow * 0.25);
+    const b = Math.max(this.hitFlash * 0.75, 0);
+    this.hullMat.emissive.setRGB(r, g, b);
   }
 
   /** Starts the sink animation; safe to call every frame while dead. */
@@ -593,13 +616,13 @@ export class Ship {
     if (this.sinking) {
       const t = this.sinkTimer / SINK_DURATION;
       const eased = t * t;
-      this.group.position.set(this.position.x, waveHeight + WATERLINE_OFFSET - eased * 2.5, this.position.z);
+      this.group.position.set(this.position.x, waveHeight + WATERLINE_OFFSET * this.scale - eased * 2.5, this.position.z);
       this.group.rotation.y = this.heading;
       this.group.rotation.z = this.sinkListDir * eased * 0.9;
       this.group.rotation.x = eased * 0.4;
       return;
     }
-    this.group.position.set(this.position.x, waveHeight + WATERLINE_OFFSET, this.position.z);
+    this.group.position.set(this.position.x, waveHeight + WATERLINE_OFFSET * this.scale, this.position.z);
     this.group.rotation.y = this.heading;
     const bob = Math.sin(time * 1.6 + this.bobPhase) * 0.05;
     this.group.rotation.z = bob;
