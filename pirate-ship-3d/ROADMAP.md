@@ -115,6 +115,48 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   ~12s there's a chance (proportional to how hot you are) that a hunter ship
   scaled to your heat level spawns nearby — the classic push-your-luck timer
   pushing you back toward port. Session-only, not persisted across logins.
+- [x] **Early-session bot difficulty pacing (S):** audited the economy/
+  progression curve specifically through a 5-15 minute mobile session lens
+  (phone-first game, not an open-ended desktop sit). The standout problem:
+  `spawnBotWave`/`spawnRivalCaptain` picked a difficulty tier from
+  `floor(dist / 220)` off spawn distance from home port (dist ∈ [120, 870)
+  on the default 900-radius world), but the tier-0 band (dist 120-220) was
+  only 100 of those 750 units wide — **13.3%** of spawns. Tier-1 bots have
+  more HP headroom (100 vs. round shot's 12 dmg = 9 hits to kill) than their
+  reload-speed penalty gives back (bot reload 1.53s vs. player's 1.1s still
+  only needs 4 hits at 18 dmg to kill a stock 60-HP sloop in ~6.1s, beating
+  the player's own ~8.8s min TTK) — so a first-time player's *nearest*
+  reachable fight was, ~87% of the time, one their starting ship couldn't
+  realistically win, before they'd earned enough gold (2 tier-0 kills' worth,
+  40g for the cheapest upgrade) to be anything but a sloop with all stats at
+  0. That's a losing-fight-dominated first several minutes on exactly the
+  session length this game is designed around, not a hard-but-fair one.
+  Fixed by widening the tier-0 band relative to the same overall spawn
+  range: extracted the duplicated inline formula into a shared
+  `tierForDistance()` (`BOT_TIER_MIN_DIST = 120`, `BOT_TIER_STEP = 190`),
+  giving four roughly-equal ~190-unit bands instead of one narrow one plus
+  three wide ones. Tier-0 share of spawns: **13.3% → 25.3%** (exact, see
+  verification below); tier-3 share correspondingly drops slightly, **28.0%
+  → 24.0%** — a real trade-off, not a buff: the far edge of the map (where
+  players who've already upgraded are headed anyway) gets marginally fewer
+  of its toughest bots, in exchange for a new player's first few minutes
+  actually being winnable most of the time instead of a coin-flip. No
+  change to individual bot stats/rewards/AI, `ENEMY_SPAWN_INTERVAL`, or
+  `MAX_ENEMIES` — purely a redistribution of which tier spawns where.
+  Verified with a standalone `tsx` script driving a real `GameRoom`
+  instance: cleared bots and called `(room as any).spawnBotWave()` 7500
+  times with `Math.random` swept deterministically across `[0, 1)` (a
+  multiple of the 750-unit dist span, so tier boundaries land on exact
+  integer counts), reading `bot.stats.sailLevel` (which spawnBotWave sets
+  equal to `tier`) as the tier of each spawn. Old-formula tier counts
+  `[1000, 2200, 2200, 2100, 0]` of 7500 vs. new-formula counts
+  `[1900, 1900, 1900, 1800, 0]` of 7500 — both matched a hand-derived
+  expected-count array exactly, term for term, not just "close."
+  `spawnRivalCaptain` shares the same `tierForDistance()` call so rival
+  spawns get the same rebalance (rivals stay meaningfully tougher than a
+  same-tier regular bot via `RIVAL_HEALTH_MULT`/`RIVAL_SAIL_BONUS`,
+  unchanged). `npx tsc --noEmit`, `npm run typecheck:server`, and
+  `npm run build` all pass clean.
 - **Multiple ports / fast travel (M):** unlock a second and third shipyard
   further from spawn, eventually with fast travel between them.
 - **Cosmetics (S/M):** flag design, hull paint colors, sail patterns — cheap

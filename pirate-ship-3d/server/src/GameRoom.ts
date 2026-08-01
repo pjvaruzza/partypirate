@@ -87,6 +87,23 @@ const RIVAL_FIRE_WINDOW_DEG = 48;
 const RIVAL_GOLD_MULT = 3;
 const RIVAL_SAIL_BONUS = 1.5;
 
+/** How bot/rival difficulty tier scales with spawn distance from home port
+ * (dist=120 is the closest any regular bot spawns — see spawnBotWave/
+ * spawnRivalCaptain). The old flat `dist/220` step gave a tier-0 band only
+ * 100 units wide against a ~750-unit spawn range: on default worldRadius
+ * 900 that's ~13% of spawns, so a first-time player's *nearest* fight was
+ * overwhelmingly tier 1+ — whose HP lead outpaces the reload-speed edge a
+ * stock sloop has, making it a losing engagement, not a hard-but-winnable
+ * one. Widening the tier-0 band to ~25% trades a slightly smaller share of
+ * tough tier-3 encounters at the map's edge (24% vs. 28%, unchanged in raw
+ * difficulty) for a first 5-15 minute mobile session that isn't dominated
+ * by fights a fresh ship can't realistically win. */
+const BOT_TIER_MIN_DIST = 120;
+const BOT_TIER_STEP = 190;
+function tierForDistance(dist: number): number {
+  return Math.min(4, Math.max(0, Math.floor((dist - BOT_TIER_MIN_DIST) / BOT_TIER_STEP)));
+}
+
 /** Ammo types are trade-offs, not upgrades — each deals less base damage
  * than round shot in exchange for a situational effect, so round shot stays
  * the correct default rather than something special ammo strictly beats. */
@@ -285,8 +302,8 @@ export class GameRoom {
     const botCount = [...this.ships.values()].filter((s) => s.isBot).length;
     if (botCount >= MAX_ENEMIES) return;
     const angle = Math.random() * Math.PI * 2;
-    const dist = 120 + Math.random() * (this.worldRadius - 150);
-    const tier = Math.min(4, Math.floor(dist / 220));
+    const dist = BOT_TIER_MIN_DIST + Math.random() * (this.worldRadius - 150);
+    const tier = tierForDistance(dist);
     const stats: ShipStats = { sailLevel: tier, cannonLevel: tier, hullLevel: tier };
     const id = randomUUID();
     const x = Math.cos(angle) * dist;
@@ -378,8 +395,8 @@ export class GameRoom {
     const name = available[Math.floor(Math.random() * available.length)];
 
     const angle = Math.random() * Math.PI * 2;
-    const dist = 120 + Math.random() * (this.worldRadius - 150);
-    const tier = Math.min(4, Math.floor(dist / 220));
+    const dist = BOT_TIER_MIN_DIST + Math.random() * (this.worldRadius - 150);
+    const tier = tierForDistance(dist);
     const stats: ShipStats = { sailLevel: tier + RIVAL_SAIL_BONUS, cannonLevel: tier, hullLevel: tier };
     const id = randomUUID();
     const x = Math.cos(angle) * dist;
