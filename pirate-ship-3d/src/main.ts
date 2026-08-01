@@ -376,6 +376,10 @@ function handleEvents(events: GameEvent[]) {
     } else if (ev.type === 'sunk') {
       effects.sinkExplosion(new THREE.Vector3(ev.x, 0, ev.z));
       sound.sink();
+      // Defensive: guarantees the burn loop can't outlive the ship even if
+      // a snapshot with `burning: false` never arrives before the socket
+      // drops (e.g. this was the local player's own death).
+      if (ev.shipId === network.yourId) sound.setBurning(false);
       triggerHitstop(0.09);
     } else if (ev.type === 'message') {
       hud.showMessage(ev.text, ev.duration);
@@ -451,6 +455,11 @@ function animate() {
       ship.maxHealth = cur.maxHealth;
       ship.alive = cur.alive;
       ship.setStatusEffects(cur.sailDisabled, cur.burning);
+      // Only the local ship's burn state drives audio — every burning ship
+      // in a fight would mean one extra looping voice per ship, which is
+      // exactly the "dozens of simultaneous oscillator graphs" mobile-audio
+      // constraint this file is meant to avoid.
+      if (isYou) sound.setBurning(cur.burning);
       if (cur.alive) ship.resetSink();
       else ship.beginSinking();
 

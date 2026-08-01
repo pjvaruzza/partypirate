@@ -5,6 +5,9 @@ export class SoundManager {
   private masterGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
   private ambientStarted = false;
+  private burning = false;
+  private burnBed: { src: AudioBufferSourceNode; gain: GainNode; lfo: OscillatorNode } | null = null;
+  private burnCrackleHandle: number | null = null;
 
   /** Must be called from a user-gesture handler — browsers block audio until then. */
   resume() {
@@ -135,6 +138,84 @@ export class SoundManager {
     this.envelope(gain, 0.02, 1.3, 0.5);
     osc.start();
     osc.stop(this.ctx.currentTime + 1.5);
+  }
+
+  /** Continuous cue for the local player's own ship while a fire-shot hit
+   * has it ablaze: a breathing hiss/roar bed plus randomly-timed crackle
+   * pops, so the several-seconds-long ticking burn damage stays audible as
+   * an ongoing threat instead of the game going quiet right after the
+   * initial hit. Deliberately only ever wired up for the local ship (see
+   * main.ts) rather than every burning ship in a fight — that keeps this
+   * to at most one extra looping voice no matter how chaotic combat gets. */
+  setBurning(burning: boolean) {
+    if (!this.ctx || burning === this.burning) return;
+    this.burning = burning;
+    if (burning) this.startBurning();
+    else this.stopBurning();
+  }
+
+  private startBurning() {
+    const ctx = this.ctx!;
+    const src = this.noiseSource();
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 2600;
+    filter.Q.value = 0.9;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.16, ctx.currentTime + 0.4);
+    src.connect(filter).connect(gain).connect(this.masterGain!);
+    src.start();
+
+    // Slow-ish LFO on the bandpass cutoff so the roar "breathes" like a
+    // real flame instead of sitting on one static hiss.
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 4;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 500;
+    lfo.connect(lfoGain).connect(filter.frequency);
+    lfo.start();
+
+    this.burnBed = { src, gain, lfo };
+    this.scheduleCrackle();
+  }
+
+  /** Schedules one short high-passed noise "pop" and re-arms itself at a
+   * random short delay — a lightweight stand-in for a Poisson-ish crackle
+   * pattern. Self-terminating (`stop()` scheduled up front) and re-checks
+   * `this.burning` before each re-arm, so stopping burning drains this to
+   * zero extra nodes/timers rather than leaking a runaway timer chain. */
+  private scheduleCrackle() {
+    if (!this.burning || !this.ctx) return;
+    const ctx = this.ctx;
+    const src = this.noiseSource();
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 1800 + Math.random() * 1500;
+    const gain = ctx.createGain();
+    src.connect(filter).connect(gain).connect(this.masterGain!);
+    this.envelope(gain, 0.001, 0.05 + Math.random() * 0.04, 0.22 + Math.random() * 0.15);
+    src.start();
+    src.stop(ctx.currentTime + 0.15);
+
+    this.burnCrackleHandle = window.setTimeout(() => this.scheduleCrackle(), 90 + Math.random() * 180);
+  }
+
+  private stopBurning() {
+    if (this.burnCrackleHandle !== null) {
+      clearTimeout(this.burnCrackleHandle);
+      this.burnCrackleHandle = null;
+    }
+    if (this.burnBed && this.ctx) {
+      const { src, gain, lfo } = this.burnBed;
+      const now = this.ctx.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(0.0001, now + 0.25);
+      src.stop(now + 0.3);
+      lfo.stop(now + 0.3);
+      this.burnBed = null;
+    }
   }
 
   private startAmbient() {

@@ -16,9 +16,45 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   taking a hit, and a red/white hit-flash tint on any ship taking damage.
   See `src/game/Effects.ts`.
 - [x] **Sound (S/M):** cannon fire, splashes, hit impacts, a descending
-  "sink" sting, and a looping wind/wave ambient bed — all synthesized live
-  via Web Audio (filtered noise + oscillators), no audio assets needed. See
-  `src/game/Audio.ts`. Still open: wood-creaking detail layer, real music.
+  "sink" sting, a distinct heavier ram-impact crunch, and a looping
+  wind/wave ambient bed — all synthesized live via Web Audio (filtered
+  noise + oscillators), no audio assets needed. See `src/game/Audio.ts`.
+  Still open: wood-creaking detail layer, real music.
+- [x] **Burning-ship audio cue (S):** audited which of this session's new
+  mechanics (ammo types, ramming, status effects) were silent — `ram`
+  already had its own `ramImpact()` (confirmed distinct from the generic
+  `hitImpact()`), but fire-shot's burning status had *no* audio at all
+  beyond the identical-to-any-other-hit initial impact: the `hit` event
+  doesn't carry `ammoType`, so there wasn't even a distinct "catches fire"
+  sting, and the several-seconds-long ticking burn (`ShipSnapshot.burning`)
+  went completely silent after that. Added `SoundManager.setBurning()`: a
+  breathing bandpass-noise roar bed (LFO-modulated cutoff so it "breathes"
+  like flame) plus randomly-timed high-passed crackle pops scheduled via a
+  self-re-arming timer that checks `this.burning` before each re-arm (so
+  stopping drains to zero extra nodes/timers, no leaked chain). Wired in
+  `main.ts` only for the local player's own ship (`isYou`), not every
+  burning ship in a fight — this game's audio is non-spatial (no panning),
+  so mirroring every burning ship's status would mean one extra looping
+  voice per burning ship in a chaotic multi-ship fight, exactly the "dozens
+  of simultaneous oscillator graphs" mobile-audio failure mode to avoid;
+  the local-ship-only cue is also the highest-value case since it's the
+  player's own persistent-damage warning. Also force-stops the loop on the
+  local player's own `sunk` event as a defensive backstop against depending
+  on state-sync timing. Verified via Playwright: `AudioContext.currentTime`
+  progresses normally through a 300-call burst of fire/hit/splash/ram with
+  no console/`AudioContext` errors; `setBurning(true)` creates exactly one
+  bed+timer pair and repeated idempotent calls don't duplicate nodes;
+  rapid on/off cycling tears the bed and timer down cleanly every time
+  (`burnBed`/`burnCrackleHandle` both null afterward); `setMuted(true)`
+  zeroes `masterGain` immediately while burning is in flight (silent, but
+  the logical burning state is preserved so it resumes seamlessly on
+  unmute — matches how mute already behaves for everything else in this
+  file). `npx tsc --noEmit` and `npm run build` both clean.
+  **Flag for gameplay-designer:** `fire`/`hit` events carry no `ammoType`,
+  so chain/grape/fire cannon fire and the initial fire-shot hit all still
+  sound identical to round shot — a genuinely distinct ignition sting and
+  a chain-shot "fouling" whirr/snap are the next-best silent-mechanic gaps,
+  but both need `ammoType` added to those `GameEvent`s first.
 - [x] **Sinking animation (S):** ships now list to one side and settle
   ~2.5 units into the water over ~2.2s (with the sink explosion/sound
   firing at the moment of death) instead of vanishing instantly, for both
