@@ -314,7 +314,14 @@ portBtn.addEventListener('click', () => {
 const input = new InputManager();
 
 // --- camera rig ---------------------------------------------------------
-const cameraOffset = new THREE.Vector3(0, 7, 13);
+// Was (0, 7, 13), i.e. looking down at the ship at ~23°. At that pitch a hull
+// 4 units long and ~1.4 deep projects its 4-unit deck plan almost in full and
+// its hull side down to a ~0.3-unit sliver — a 12:1 ratio, which is why the
+// ship read as an open dish you're staring into rather than a vessel. 5.2/13
+// is ~16°, roughly halving the deck's share and doubling the hull side's,
+// without meaningfully costing forward visibility (the ship also ends up
+// marginally closer to the camera, so it isn't any smaller on screen).
+const cameraOffset = new THREE.Vector3(0, 5.2, 13);
 const cameraTarget = new THREE.Vector3();
 
 // --- damage flash / screen shake -----------------------------------------
@@ -397,6 +404,13 @@ function handleEvents(events: GameEvent[]) {
 const clock = new THREE.Clock();
 let elapsed = 0;
 
+/** Wave-height sampler handed to Ship.syncVisual so each hull can ride the
+ * chord between its own bow and stern rather than sitting flat at its centre
+ * height. Allocated once, with the time captured through a mutable module
+ * variable, so the render loop stays allocation-free. */
+let waveSampleTime = 0;
+const waveAt = (x: number, z: number) => ocean.getHeightAt(x, z, waveSampleTime);
+
 function animate() {
   let dt = Math.min(clock.getDelta(), 0.05);
   if (hitstopTimer > 0) {
@@ -404,6 +418,7 @@ function animate() {
     dt *= 0.08;
   }
   elapsed += dt;
+  waveSampleTime = elapsed;
   ocean.update(elapsed);
   sky.update(elapsed);
   effects.update(dt);
@@ -470,7 +485,7 @@ function animate() {
       ship.updateSink(dt);
       ship.updateHitFlash(dt, elapsed);
       const h = ocean.getHeightAt(cur.x, cur.z, elapsed);
-      ship.syncVisual(h, elapsed);
+      ship.syncVisual(h, elapsed, waveAt);
 
       if (isYou) {
         mine = cur;

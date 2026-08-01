@@ -338,6 +338,59 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   `scale` in `syncVisual` and retuning the constant so exposed freeboard is
   roughly half the hull's total vertical extent across all classes, not
   just the one scale it happened to be tuned against originally.
+- [x] **"Ships look partially submerged", third pass — actually fixed (M):**
+  the complaint survived two `WATERLINE_OFFSET` retunes, so this pass
+  deliberately refused to touch that constant again and instead instrumented
+  the renderer. **Method that finally settled it:** joined a real game, froze
+  `elapsed` and pinned the ship via temporary probe hooks, then (a) planted
+  marker spheres at known world Y either side of the surface, (b) diffed a
+  render against one with `ocean.mesh.visible = false`, (c) repainted the
+  ocean's fragment shader flat magenta, and (d) raycast down a screen column
+  to map pixel rows to world Y. Result: **the ocean was already clipping the
+  hull at the correct height** (rendered cut at local y +0.014 against a wave
+  surface at −0.091) — the Y offset was never the real problem, which is why
+  retuning it twice didn't help. Five separate causes were found instead:
+  1. **A hole in the transom.** `buildLoftedHullGeometry` fanned the stern
+     closed from a centroid over the U-shaped station ring only, leaving a
+     wedge above the two spokes uncovered. Dead astern — precisely the chase
+     camera's angle — you could see open sea *through* the back of the ship.
+     Fixed by also fanning the rail-to-rail closing edge (and adding the same
+     closure at the stem).
+  2. **No bulwark.** The deck *was* the sheer line, so at the chase camera's
+     ~23° pitch a hull 4 long and 0.92 deep projected its whole deck plan and
+     only a ~0.3 sliver of hull side: you looked into an open dish. Deck is
+     now recessed `BULWARK_HEIGHT = 0.34` below the rail, and the hull
+     material went `DoubleSide` so the inner topsides aren't culled away.
+  3. **Wineglass sections.** The loft used `x = beam * v^0.5`, which pinched
+     to almost nothing by the waterline, so every hull met the sea in a thin
+     V. Now `v^0.35` (new `sectionFullness`): waterline half-beam at the
+     transom goes ~40% → ~65% of the rail's, amidships 67% → 79%. Keel rocker
+     softened 0.55 → 0.42 so the transom stays immersed.
+  4. **No water-contact cue at all.** Added `buildFoamCollar` — a closed,
+     offset foam ring traced along the hull's actual waterline outline
+     (deliberately a *ring*, not two side strips: side-only foam is
+     self-occluded by the stern from the chase camera, the one view that has
+     to look right), widening into a bow wave and a wake, opacity driven by
+     speed. Plus a boot-top: hull vertex colours darken below y = 0.
+  5. **The sea was bigger than the ships.** Ocean amplitudes summed to 1.65
+     (3.3 peak-to-trough) against a hull 4 long and 0.92 deep, so water 8
+     units from a ship could be a whole hull-depth below its waterline —
+     measured 1.01. Now 0.46/0.25/0.13 (sum 0.84, delta at 8 units 0.51);
+     `smoothstep` thresholds for depth colour (−0.6/1.2 → −0.31/0.61) and
+     crest foam (1.05/1.5 → 0.53/0.76) rescaled to match, or crest foam would
+     simply have stopped existing.
+  Also: `WATERLINE_OFFSET` is **deleted**, not retuned — hull-local y = 0 is
+  now the waterline by definition (`HULL_DRAFT` 0.42 → 0.62 below it,
+  `HULL_FREEBOARD` 0.50 → 0.74 above, L/D 4.3 → 2.9), so there is no longer a
+  fudge factor to mis-tune a fourth time. `Ship.syncVisual` takes an optional
+  wave sampler and rides the chord between its own bow and stern (allocation-
+  free: one closure created once in `main.ts`), which cuts the worst-case
+  water-above-gunwale error across the hull from 0.27 to under 0.05, and
+  gives real pitching over swells for free. Chase camera lowered from
+  `(0, 7, 13)` to `(0, 5.2, 13)` — 23° → 16° — halving the deck's share of
+  the silhouette. Verified with real sailing gameplay (not posed) at 1280×800
+  and 390×844 @3x, plus frozen wave-crest and wave-trough shots at an
+  identical camera, all three hull classes, and a broadside close-up.
 - [x] **Island self-shadow smear (S):** a follow-up "still seems pretty bad"
   complaint about overall graphics quality was never root-caused with a
   specific fix, so this pass was a genuinely fresh critical audit —

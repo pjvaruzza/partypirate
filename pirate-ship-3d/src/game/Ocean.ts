@@ -25,9 +25,21 @@ const vertexShader = /* glsl */ `
     vec4 world = modelMatrix * vec4(position, 1.0);
     vec2 p = vec2(world.x, -world.z);
 
-    vec3 w1 = waveWithDeriv(p, normalize(vec2(1.0, 0.3)), 0.06, 0.9, 1.4, uTime);
-    vec3 w2 = waveWithDeriv(p, normalize(vec2(-0.4, 1.0)), 0.11, 0.5, 1.9, uTime);
-    vec3 w3 = waveWithDeriv(p, normalize(vec2(0.7, -0.6)), 0.22, 0.25, 2.6, uTime);
+    // Amplitudes are deliberately small RELATIVE TO A SHIP. They used to sum
+    // to 1.65 (3.3 peak-to-trough) against a hull only ~0.9 deep and 4 long:
+    // the sea was literally taller than the boats floating in it, so the water
+    // 8 units from a ship could be a full hull-depth lower than the ship's own
+    // waterline. From the chase camera — which looks down over exactly that
+    // patch of water — you therefore saw the ship's entire underbody and keel
+    // hanging in mid-air, or, half a wave later, water standing above its
+    // gunwale. That mismatch, not the hull's Y offset, is why ships never
+    // read as sitting *in* the sea. Keep the sum here comfortably under
+    // Ship.ts's HULL_DRAFT + HULL_FREEBOARD. Frequencies are unchanged (the
+    // shortest wavelength, ~29 units, is already near what the warped ocean
+    // mesh can resolve at distance without shimmering).
+    vec3 w1 = waveWithDeriv(p, normalize(vec2(1.0, 0.3)), 0.06, 0.46, 1.4, uTime);
+    vec3 w2 = waveWithDeriv(p, normalize(vec2(-0.4, 1.0)), 0.11, 0.25, 1.9, uTime);
+    vec3 w3 = waveWithDeriv(p, normalize(vec2(0.7, -0.6)), 0.22, 0.13, 2.6, uTime);
     float h = w1.x + w2.x + w3.x;
     float dhdx = w1.y + w2.y + w3.y; // d(h)/d(worldX)
     float dhdy = w1.z + w2.z + w3.z; // d(h)/d(p.y), and p.y = -worldZ
@@ -95,7 +107,11 @@ const fragmentShader = /* glsl */ `
     vec3 foam = vec3(0.85, 0.95, 0.98);
     vec3 skyReflect = vec3(0.60, 0.79, 0.93);
 
-    float t = smoothstep(-0.6, 1.2, vHeight);
+    // Thresholds are fractions of the new ±0.84 height range — the old
+    // absolute -0.6/1.2 and 1.05/1.5 numbers were tuned against the old ±1.65
+    // range and would now never be reached at all, so crest foam would simply
+    // have stopped existing.
+    float t = smoothstep(-0.31, 0.61, vHeight);
     vec3 baseColor = mix(deep, shallow, t);
 
     vec3 N = normalize(vNormal);
@@ -117,7 +133,7 @@ const fragmentShader = /* glsl */ `
     float spec = pow(max(dot(N, H), 0.0), 120.0);
     color += vec3(1.0, 0.97, 0.88) * spec * 0.9;
 
-    float foamMix = max(smoothstep(1.05, 1.5, vHeight), shoreFoam() * 0.85);
+    float foamMix = max(smoothstep(0.53, 0.76, vHeight), shoreFoam() * 0.85);
     color = mix(color, foam, foamMix * 0.6);
 
     gl_FragColor = vec4(color, 1.0);
@@ -216,9 +232,9 @@ export class Ocean {
     const dir2 = normalize(-0.4, 1.0);
     const dir3 = normalize(0.7, -0.6);
     let h = 0;
-    h += Math.sin((x * dir1[0] + y * dir1[1]) * 0.06 + time * 1.4) * 0.9;
-    h += Math.sin((x * dir2[0] + y * dir2[1]) * 0.11 + time * 1.9) * 0.5;
-    h += Math.sin((x * dir3[0] + y * dir3[1]) * 0.22 + time * 2.6) * 0.25;
+    h += Math.sin((x * dir1[0] + y * dir1[1]) * 0.06 + time * 1.4) * 0.46;
+    h += Math.sin((x * dir2[0] + y * dir2[1]) * 0.11 + time * 1.9) * 0.25;
+    h += Math.sin((x * dir3[0] + y * dir3[1]) * 0.22 + time * 2.6) * 0.13;
     return h;
   }
 }
