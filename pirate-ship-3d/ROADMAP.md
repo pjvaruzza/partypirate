@@ -279,6 +279,28 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   The Starboard cannon-slot grid fix from the prior pass was re-verified
   intact (bounding-rect + `elementFromPoint` on the Starboard `+` button)
   at all three viewports.
+  **Follow-up (`#port-btn` focus leak, S):** a later `qa-verify` pass found
+  that clicking `#port-btn` left it holding keyboard focus indefinitely —
+  neither `showShipyard()`/`hideShipyard()` nor the Escape handler above
+  ever called `.blur()`. Since Space is the fire key, a focused `<button>`
+  treats Space as native "activate," so pressing Space after closing the
+  shipyard (via Escape or the tap-close button) silently reopened it
+  mid-combat and hijacked the fire key — desktop-keyboard-only, since
+  mobile's touch fire button is a separate element. Fixed with defense in
+  depth: `portBtn.blur()` immediately after the click handler in
+  `main.ts` opens the shipyard, plus `hideShipyard()` in `HUD.ts` also
+  blurs `#port-btn` and any focused element still inside `#shipyard` (so
+  tap-close, which focuses `#shipyard-close` itself, is covered too).
+  Verified with Playwright at desktop (1280×800) and `devices['iPhone 13']`:
+  after opening via a fresh click, closing via Escape and separately via
+  the tap-close button, `document.activeElement` was neither `#port-btn`
+  nor any shipyard-internal element in either case, a subsequent `Space`
+  keypress left `#shipyard` hidden (previously reopened it), and a fresh
+  click on `#port-btn` afterward still opened the shipyard normally — the
+  side effect was removed without touching the button's actual job.
+  Reproduced the pre-fix bug first (Space did reopen the shipyard,
+  confirming the harness was valid) before applying and re-verifying the
+  fix.
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
   (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
   other ships as color-coded blips (blue players, red bots, brighter

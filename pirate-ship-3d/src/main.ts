@@ -304,6 +304,10 @@ hud.onBuyClass = () => network.buyShipClass();
 hud.onShipyardClose = () => {};
 portBtn.addEventListener('click', () => {
   if (!hud.isShipyardOpen()) hud.showShipyard();
+  // Don't let the button hold keyboard focus: Space is the fire key, and a
+  // focused <button> treats Space as "activate", which would silently
+  // reopen the shipyard mid-combat after it's closed (see c9fc634 follow-up).
+  portBtn.blur();
 });
 
 // --- input ------------------------------------------------------------------

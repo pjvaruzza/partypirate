@@ -15,6 +15,7 @@ export class HUD {
   private banner = document.getElementById('message-banner') as HTMLDivElement;
   private shipyard = document.getElementById('shipyard') as HTMLDivElement;
   private shipyardClose = document.getElementById('shipyard-close') as HTMLButtonElement;
+  private portBtn = document.getElementById('port-btn') as HTMLButtonElement | null;
   private slotsLabel = document.getElementById('cannon-slots-label') as HTMLSpanElement;
   private className = document.getElementById('class-name') as HTMLSpanElement;
   private classBuyBtn = document.getElementById('class-buy-btn') as HTMLButtonElement;
@@ -83,6 +84,15 @@ export class HUD {
 
   hideShipyard() {
     this.shipyard.classList.add('hidden');
+    // Defense in depth alongside main.ts's blur-on-open: whichever element
+    // still has focus when the shipyard closes (typically #port-btn, but
+    // #shipyard-close itself if closed by tap) must not keep it, or a
+    // trailing Space press (the fire key) would re-trigger it as a native
+    // button activation instead of firing a cannon.
+    this.portBtn?.blur();
+    if (document.activeElement instanceof HTMLElement && this.shipyard.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
   }
 
   isShipyardOpen(): boolean {
