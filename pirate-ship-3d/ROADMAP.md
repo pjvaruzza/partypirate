@@ -371,6 +371,54 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   `grep -c "__pg\|__probe\|__debug" src/main.ts src/ui/*.ts` returned 0
   everywhere (no debug hooks were needed for this pass — every check used
   real DOM/bounding-box queries against the live page).
+  **Follow-up correction:** despite the re-verification above, two real
+  regressions from this same redesign slipped through — the prior pass's
+  own checks confirmed the Starboard slot's bounding box and
+  `#shipyard-close` reachability but never actually measured the Bow row
+  (grid-row 2, the one most likely to sit at the clipped boundary) or the
+  ship-class button's text width. Found independently via direct
+  `getBoundingClientRect`/`elementFromPoint` checks, not screenshots: (1)
+  the added heading/border/row weight had pushed `#shipyard-scroll`'s
+  content to 580px against 464px of visible area at 375×667 (116px over),
+  and `elementFromPoint()` at the Bow minus-button's own computed center
+  returned `#shipyard-close` instead of the button itself — a tap there
+  hit "Set Sail," not the cannon control; (2) `#class-buy-btn` measured
+  `scrollWidth: 124` vs `clientWidth: 112` (12px of "Buy Brigantine 900"
+  running past the button's right edge) — the longest labels in the panel,
+  which the shared `.buy-btn` 88px min-width was never sized for. Fixed by
+  choosing "make everything fit" over "make scrolling discoverable" for
+  bug 1, since the overflow was recoverable without touching any 44px
+  touch target: added a touch-only (`(hover: none), (pointer: coarse)`,
+  the same query the desktop-hint/touch-hint swap already uses) compaction
+  pass — tighter panel padding (24px→12px), thinner rope border
+  (6px→4px), smaller/tighter heading (26px/12px margin→21px/6px), tighter
+  row padding (8px→4px), a widened `.upgrade-desc` max-width (220px→260px,
+  which puts the two longest upgrade descriptions at one line instead of
+  two — free height, since the buy button's 44px min-height was already
+  the taller floor either way), and trimmed cannon-builder/hint/close-
+  button spacing — leaving desktop's default rule (and its rope
+  border/heading size, the redesign's actual visual identity) completely
+  untouched. Content height dropped from 580px to 506px against a
+  506px-tall `#shipyard-scroll` at 375×667 (0px overflow, confirmed at
+  both iPhone 8's 667px and iPhone 13's slightly-shorter 664px viewport
+  height) — `elementFromPoint` at the Bow minus/plus buttons' centers now
+  returns the buttons themselves, and real Playwright `tap()`s (not
+  trials) on Bow and Starboard's plus/minus actually incremented/
+  decremented `.slot-count` end-to-end through a live server connection.
+  Bug 2 fixed with a dedicated `#class-buy-btn` rule (`min-width: 140px`,
+  tighter `10px` horizontal padding) rather than widening every `.buy-btn`
+  in the panel — `scrollWidth`/`clientWidth` now match exactly (138px/
+  138px) for both "Buy Brigantine 900" and the even-longer "Buy Galleon
+  3000". Re-verified everything the prior pass claimed still holds at
+  375×667: Starboard slot on-screen and tappable (real tap, not just
+  bounding-box math), ammo selector functional (`.active` toggles on
+  tap), `#shipyard-close` reachable via tap and `Escape`, `#port-btn`
+  Space-reopen regression still fixed. Desktop (1280×800) unchanged and
+  unaffected by the touch-only media query — `#shipyard-scroll` still
+  measures 580px/580px (0 overflow), identical to the prior pass's
+  numbers. `npx tsc --noEmit` and `npm run build` both clean;
+  `grep -c "__pg\|__probe\|__debug"` returned 0 across all changed files
+  (only `src/style.css` changed this pass — no HTML/TS touched).
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
   (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
   other ships as color-coded blips (blue players, red bots, brighter

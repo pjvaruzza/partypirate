@@ -483,6 +483,18 @@ body {
   cursor: not-allowed;
 }
 
+/* The ship-class row's button carries the longest labels in the panel
+   ("Buy Brigantine 900" / "Buy Galleon 3000") — every other buy button
+   fits .buy-btn's shared 88px min-width fine, but this one measured
+   124px of content against a 112px box at 375x667 (12px of text running
+   past the button's own right edge). Only this button needs the extra
+   room, so it gets its own min-width instead of widening every buy
+   button in the panel. */
+#class-buy-btn {
+  min-width: 140px;
+  padding: 8px 10px;
+}
+
 #cannon-builder {
   margin-top: 6px;
   padding-top: 8px;
@@ -656,6 +668,69 @@ body {
   }
   .touch-hint {
     display: inline;
+  }
+}
+
+/* Touch-only shipyard compaction — the redesign's added vertical weight
+   (bigger serif heading, thicker rope border, roomier row padding) pushed
+   #shipyard-scroll's content past its clipped viewport height on a short
+   phone (measured 580px of content vs 464px of visible area at 375x667,
+   116px over — confirmed via getBoundingClientRect that the Bow row's
+   controls sat below #shipyard-scroll's own bottom edge, and
+   elementFromPoint at the Bow minus-button's center hit #shipyard-close
+   instead). Desktop already fits with room to spare (c9fc634's design
+   intent) so none of this touches the default rule — it's scoped to the
+   same coarse-pointer/no-hover query as the hint swap above, trimming
+   spacing (not the 44px touch targets themselves) until the whole panel
+   fits without scrolling on an iPhone 8/SE-class viewport. */
+@media (hover: none), (pointer: coarse) {
+  #shipyard-panel {
+    padding: 12px 18px;
+    border-width: 4px;
+  }
+
+  #shipyard-panel h2 {
+    margin: 0 0 6px;
+    font-size: 21px;
+  }
+
+  .upgrade-row {
+    padding: 4px 0;
+  }
+
+  .upgrade-desc {
+    /* Widened from 220px so the two longest descriptions ("Bigger hull,
+       more cannon slots..." / "More damage, faster reload...") clear at
+       one line instead of wrapping to two — the buy button's 44px min-
+       height was already the floor either way, so a wrapped second line
+       was pure added height with no payoff. */
+    max-width: 260px;
+  }
+
+  #cannon-builder {
+    margin-top: 4px;
+    padding-top: 4px;
+  }
+
+  #cannon-builder h3 {
+    margin: 0 0 6px;
+  }
+
+  .cannon-slot {
+    padding: 4px 6px;
+  }
+
+  .cannon-slot-label {
+    margin-bottom: 3px;
+  }
+
+  .cannon-builder-hint {
+    margin-top: 4px;
+    font-size: 10.5px;
+  }
+
+  #shipyard-close {
+    margin-top: 6px;
   }
 }
 
