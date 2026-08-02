@@ -10,11 +10,11 @@
       <canvas id="scene"></canvas>
 
       <div id="join-screen">
-        <div id="join-panel">
+        <div id="join-panel" class="panel-wood">
           <h1>Rogue Tides</h1>
           <p id="join-status">Enter your captain name to set sail.</p>
           <input id="join-name" type="text" maxlength="20" placeholder="Captain name" autocomplete="off" />
-          <button id="join-btn">Set Sail</button>
+          <button id="join-btn" class="btn-primary">Set Sail</button>
         </div>
       </div>
 
@@ -22,13 +22,41 @@
         <div id="hud-top-left">
           <div id="health-bar"><div id="health-fill"></div></div>
           <div id="heat-bar" class="hidden"><div id="heat-fill"></div></div>
-          <div id="gold-counter">🪙 <span id="gold-amount">0</span></div>
+          <div id="gold-counter">
+            <svg class="icon icon-coin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="10" fill="currentColor" />
+              <circle cx="12" cy="12" r="7" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1" />
+              <path d="M12 5.5v13M5.5 12h13M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" stroke="rgba(0,0,0,0.35)" stroke-width="0.8" />
+            </svg>
+            <span id="gold-amount">0</span>
+          </div>
         </div>
         <div id="hud-top-right">
           <div id="ship-name">Sea Sprite</div>
-          <button id="chat-toggle-btn" title="Chat">💬</button>
-          <button id="help-btn" title="How to play">❓</button>
-          <button id="mute-btn" title="Mute/unmute sound">🔊</button>
+          <div id="hud-icon-row">
+            <button id="chat-toggle-btn" class="icon-btn" title="Chat">
+              <svg class="icon icon-chat" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 5.5h16a1 1 0 011 1V15a1 1 0 01-1 1H9.5L5 19.5V16H4a1 1 0 01-1-1V6.5a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+                <circle cx="8" cy="10.7" r="1.05" fill="currentColor" />
+                <circle cx="12" cy="10.7" r="1.05" fill="currentColor" />
+                <circle cx="16" cy="10.7" r="1.05" fill="currentColor" />
+              </svg>
+            </button>
+            <button id="help-btn" class="icon-btn" title="How to play">
+              <span class="icon-glyph">?</span>
+            </button>
+            <button id="mute-btn" class="icon-btn" title="Mute/unmute sound">
+              <svg class="icon icon-sound sound-on" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 9.2v5.6h3.6l5 3.9V5.3l-5 3.9H4z" fill="currentColor" />
+                <path d="M16.3 8.7a5 5 0 010 6.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                <path d="M18.7 6.3a8.6 8.6 0 010 11.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+              <svg class="icon icon-sound sound-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 9.2v5.6h3.6l5 3.9V5.3l-5 3.9H4z" fill="currentColor" />
+                <path d="M16 9.5l5.2 5M21.2 9.5L16 14.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div id="message-banner"></div>
       </div>
@@ -36,7 +64,7 @@
       <canvas id="minimap"></canvas>
 
       <div id="shipyard" class="hidden">
-        <div id="shipyard-panel">
+        <div id="shipyard-panel" class="panel-wood">
           <h2>Shipyard</h2>
           <div id="shipyard-scroll">
           <div class="upgrade-row" data-upgrade="class">
@@ -44,35 +72,35 @@
               <div class="upgrade-title">Ship Class <span id="class-name" class="upgrade-level"></span></div>
               <div class="upgrade-desc">Bigger hull, more cannon slots, tougher &amp; faster</div>
             </div>
-            <button id="class-buy-btn" class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+            <button id="class-buy-btn" class="buy-btn">Buy <span class="cost"></span></button>
           </div>
           <div class="upgrade-row" data-upgrade="sails">
             <div class="upgrade-info">
               <div class="upgrade-title">Sails <span class="upgrade-level"></span></div>
               <div class="upgrade-desc">Increases top speed &amp; acceleration</div>
             </div>
-            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+            <button class="buy-btn">Buy <span class="cost"></span></button>
           </div>
           <div class="upgrade-row" data-upgrade="cannons">
             <div class="upgrade-info">
               <div class="upgrade-title">Cannons <span class="upgrade-level"></span></div>
               <div class="upgrade-desc">More damage, faster reload &amp; an extra cannon slot to place</div>
             </div>
-            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+            <button class="buy-btn">Buy <span class="cost"></span></button>
           </div>
           <div class="upgrade-row" data-upgrade="hull">
             <div class="upgrade-info">
               <div class="upgrade-title">Hull <span class="upgrade-level"></span></div>
               <div class="upgrade-desc">Increases max health</div>
             </div>
-            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+            <button class="buy-btn">Buy <span class="cost"></span></button>
           </div>
           <div class="upgrade-row" data-upgrade="powder">
             <div class="upgrade-info">
               <div class="upgrade-title">Powder Kegs <span class="upgrade-level"></span></div>
               <div class="upgrade-desc">Gain a temporary speed &amp; fire-rate boost powerup</div>
             </div>
-            <button class="buy-btn">Buy <span class="cost"></span> 🪙</button>
+            <button class="buy-btn">Buy <span class="cost"></span></button>
           </div>
           <div id="cannon-builder">
             <h3>Cannon Placement <span id="cannon-slots-label"></span></h3>
@@ -108,12 +136,12 @@
             </div>
           </div>
           </div>
-          <button id="shipyard-close">Set Sail</button>
+          <button id="shipyard-close" class="btn-primary">Set Sail</button>
         </div>
       </div>
 
       <div id="tutorial" class="hidden">
-        <div id="tutorial-panel">
+        <div id="tutorial-panel" class="panel-wood">
           <h2>Ahoy, Captain!</h2>
           <ul class="tutorial-tips">
             <li>
@@ -130,13 +158,19 @@
             <li><strong>Shipyard:</strong> sail back to home port (the gold marker on your minimap) to upgrade your ship and place cannons.</li>
             <li><strong>Treasure:</strong> sinking enemies sometimes drops a torn map — follow the glowing beacon to dig it up.</li>
             <li><strong>Heat:</strong> sinking ships raises your wanted meter. Let it cool at port before it draws a hunter your way.</li>
-            <li><strong>Chat:</strong> press Enter or tap 💬 to talk to other captains.</li>
+            <li><strong>Chat:</strong> press Enter or tap the chat icon to talk to other captains.</li>
           </ul>
-          <button id="tutorial-close">Set Sail</button>
+          <button id="tutorial-close" class="btn-primary">Set Sail</button>
         </div>
       </div>
 
-      <button id="port-btn" class="hidden">⚓ Open Shipyard</button>
+      <button id="port-btn" class="hidden">
+        <svg class="icon icon-anchor" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="4.6" r="1.9" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path d="M12 6.4V19M7 10h10M4.7 13.5a7.3 7.3 0 0014.6 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+        </svg>
+        <span>Open Shipyard</span>
+      </button>
 
       <div id="chat-log"></div>
       <div id="chat-input-wrap" class="hidden">
@@ -145,16 +179,33 @@
 
       <div id="ammo-selector">
         <button class="ammo-btn active" data-ammo="round" title="Round Shot — full damage, the reliable default">
-          <span class="ammo-icon">⚫</span><span class="ammo-key desktop-hint">1</span>
+          <span class="ammo-icon ammo-icon-round"></span><span class="ammo-key desktop-hint">1</span>
         </button>
         <button class="ammo-btn" data-ammo="chain" title="Chain Shot — less damage, fouls the target's rigging">
-          <span class="ammo-icon">⛓️</span><span class="ammo-key desktop-hint">2</span>
+          <span class="ammo-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="6" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+              <circle cx="18" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+              <path d="M9.4 12h5.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </span><span class="ammo-key desktop-hint">2</span>
         </button>
         <button class="ammo-btn" data-ammo="grape" title="Grapeshot — a close-range shotgun blast, weak at range">
-          <span class="ammo-icon">🍇</span><span class="ammo-key desktop-hint">3</span>
+          <span class="ammo-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="6.5" r="2.4" fill="currentColor" />
+              <circle cx="6.8" cy="11.5" r="2.4" fill="currentColor" />
+              <circle cx="17.2" cy="11.5" r="2.4" fill="currentColor" />
+              <circle cx="12" cy="16.5" r="2.4" fill="currentColor" />
+            </svg>
+          </span><span class="ammo-key desktop-hint">3</span>
         </button>
         <button class="ammo-btn" data-ammo="fire" title="Fire Shot — light weak, but sets the target ablaze">
-          <span class="ammo-icon">🔥</span><span class="ammo-key desktop-hint">4</span>
+          <span class="ammo-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 2.5c1.1 2.6-1.6 3.9-1.9 6.4-.2 1.6.8 2.6 2 2.6a2.4 2.4 0 002.4-2.4c0-.7-.2-1.1-.5-1.6 1.6.9 2.6 2.8 2.6 4.9A4.6 4.6 0 0112 17a4.7 4.7 0 01-4.7-4.7c0-3.9 3-5.6 4.7-9.8z" fill="currentColor" />
+            </svg>
+          </span><span class="ammo-key desktop-hint">4</span>
         </button>
       </div>
 
@@ -162,8 +213,18 @@
         <div id="joystick-zone">
           <div id="joystick-base"><div id="joystick-knob"></div></div>
         </div>
-        <button id="fire-btn">🔥 FIRE</button>
-        <button id="boost-btn">⚡ BOOST</button>
+        <button id="fire-btn">
+          <svg class="icon icon-flame" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 2.5c1.1 2.6-1.6 3.9-1.9 6.4-.2 1.6.8 2.6 2 2.6a2.4 2.4 0 002.4-2.4c0-.7-.2-1.1-.5-1.6 1.6.9 2.6 2.8 2.6 4.9A4.6 4.6 0 0112 17a4.7 4.7 0 01-4.7-4.7c0-3.9 3-5.6 4.7-9.8z" fill="currentColor" />
+          </svg>
+          <span>FIRE</span>
+        </button>
+        <button id="boost-btn">
+          <svg class="icon icon-bolt" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M13 2L4.5 14h5.7l-1.2 8L18.5 10h-5.7l1.2-8z" fill="currentColor" />
+          </svg>
+          <span>BOOST</span>
+        </button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

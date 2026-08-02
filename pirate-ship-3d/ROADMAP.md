@@ -301,6 +301,76 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   Reproduced the pre-fix bug first (Space did reopen the shipyard,
   confirming the harness was valid) before applying and re-verifying the
   fix.
+- [x] **"Looks like AI built it" — 2D UI chrome redesign (M):** direct user
+  feedback on the shipyard/HUD/controls specifically (not the 3D world).
+  Root causes, confirmed against the actual rendered `index.html`/
+  `style.css` rather than assumed: (1) the entire UI ran on the
+  `system-ui`/`'Segoe UI'` sans-serif stack — nothing distinguished it from
+  a generic SaaS dashboard; (2) every panel/button was a flat solid color
+  (`#16283b` panels, `#3ea36b`/`#ffb14d` buttons) with uniform 8-14px
+  `border-radius` and a single drop-shadow — no texture, no hierarchy
+  beyond color; (3) raw emoji (🪙💬❓🔊⚓⚫⛓️🍇🔥) as functional icons, which
+  also render inconsistently across OS emoji fonts — confirmed via
+  screenshot that ⛓️/🍇 render as near-blank glyphs in this sandbox's
+  headless Chromium, i.e. it wasn't just a style complaint but a real
+  cross-platform legibility gap; (4) perfectly symmetric, uniformly padded
+  modals with no hand-crafted or period detail.
+  Fixed entirely with CSS-native techniques — **zero new network requests,
+  zero image/font assets**, matching this project's existing
+  no-external-assets rule: a serif display stack
+  (`Georgia, 'Iowan Old Style', 'Palatino Linotype', ... serif`) with
+  `font-variant: small-caps`, letter-spacing and an engraved text-shadow on
+  every heading; a shared `.panel-wood` class (join/shipyard/tutorial
+  panels) with a twisted-rope-look border built from
+  `border-image: repeating-linear-gradient(135deg, #8a6633 0 4px, #4a3216
+  4px 8px)`, a parchment-toned `linear-gradient` face
+  (`#ead9ad`→`#cdb27c`), and layered inset `box-shadow`s for a carved
+  bevel instead of a flat 2px border; a brass-gradient `.btn-primary`
+  (`linear-gradient(180deg, #f0cf6a, #c9a227 55%, #7a5a12)`) reserved for
+  the one primary action per screen, with a darker-wood `.buy-btn` variant
+  for the shipyard's repeated secondary actions; brass-rimmed circular
+  `.icon-btn`s (chat/help/mute) replacing bare emoji glyphs; hand-authored
+  inline `<svg>` icons for chat, mute/unmute (two-state, toggled via a
+  `.muted` class the same way `.desktop-hint`/`.touch-hint` already toggle,
+  rather than a new mechanism), anchor (`#port-btn`), and all four ammo
+  types (round shot is a plain CSS radial-gradient sphere, chain shot two
+  linked rings, grapeshot a 4-dot cluster, fire shot a flame path tinted
+  with a distinct ember color so it doesn't read as "generic brass" like
+  the metal ammo types); health/heat bars restyled as dark gunmetal-gauge
+  troughs with a blood-red→ember fill instead of the previous flat pill
+  gradient. The shared gold-coin SVG is defined once in `HUD.ts`
+  (`COIN_ICON`) and interpolated into the buy-button `innerHTML` so the
+  dynamic shipyard buttons and the static `#gold-counter` render an
+  identical icon rather than drifting.
+  **Regression risk this pass specifically re-verified, not just
+  assumed fine:** the `.icon-btn` restyle for chat/help/mute grew them
+  from a previously-unaddressed ~22×18px hit area (flagged but not fixed
+  in the touch-target pass above) to a real 44×44px target, which required
+  restructuring `#hud-top-right` from a single row into a
+  ship-name-over-icon-row column — re-checked the minimap doesn't overlap
+  (`#minimap`'s `top` offset moved 62px→108px to clear the taller
+  cluster). The bigger border/padding/heading-divider on `.panel-wood`
+  initially pushed the shipyard panel's natural height from ~764px to
+  ~792px, which would have reintroduced an unwanted scrollbar on the
+  1280×800 desktop viewport the prior soft-lock fix explicitly tuned
+  against (a flat `90vh` cap was rejected there for the same reason) —
+  caught by directly measuring `#shipyard-scroll`'s `scrollHeight` vs.
+  `clientHeight` before/after, not by eyeballing a screenshot, then trimmed
+  border width, heading margins, and per-row padding until natural height
+  (751px) cleared the `calc(100vh - 32px)` cap again with margin.
+  Re-verified with Playwright at desktop (1280×800) and `devices['iPhone
+  8']` (375×667, the stricter viewport used throughout this session): the
+  shipyard's `#shipyard-close` is reachable via `elementFromPoint` and a
+  real `tap()`/`click()` at both sizes, Escape still closes it, the
+  Starboard cannon-slot `+` button bounding box is fully on-screen at both
+  sizes, the ammo selector's fire-shot button both measures 44×44px and
+  actually toggles `.active` on click, `#chat-toggle-btn` measures
+  44×44px, and the `#port-btn` focus/Space-reopens-shipyard regression
+  from the prior fix stays fixed (`Space` after a tap-close leaves
+  `#shipyard` hidden). `npx tsc --noEmit` and `npm run build` both clean;
+  `grep -c "__pg\|__probe\|__debug" src/main.ts src/ui/*.ts` returned 0
+  everywhere (no debug hooks were needed for this pass — every check used
+  real DOM/bounding-box queries against the live page).
 - [x] **Minimap/compass (S/M):** a circular radar in the top-right corner
   (`src/ui/Minimap.ts`) shows nearby islands (home port marked gold),
   other ships as color-coded blips (blue players, red bots, brighter

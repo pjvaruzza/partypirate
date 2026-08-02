@@ -1,3 +1,22 @@
+:root {
+  /* Pirate palette — aged wood / brass / parchment / blood & ember, instead
+     of the flat navy-panel-with-candy-accent look this replaced. Every
+     texture below is built from these with CSS gradients/shadows only, no
+     image assets. */
+  --wood-light: #7a4f2c;
+  --wood-mid: #4d3018;
+  --wood-dark: #2a1a0d;
+  --ink: #1b1006;
+  --parchment: #ead9ad;
+  --parchment-dark: #cdb27c;
+  --brass: #c9a227;
+  --brass-light: #f0cf6a;
+  --brass-dark: #7a5a12;
+  --blood: #7a1f14;
+  --ember: #ff7a1a;
+  --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, 'Times New Roman', serif;
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -11,7 +30,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: #06111c;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-display);
   user-select: none;
 }
 
@@ -25,6 +44,12 @@ body {
   inset: 0;
   display: block;
   touch-action: none;
+}
+
+.icon {
+  display: block;
+  width: 1em;
+  height: 1em;
 }
 
 #hud {
@@ -44,29 +69,36 @@ body {
   gap: 8px;
 }
 
+/* Health/heat read as brass-rimmed instrument gauges — a dark gunmetal
+   trough with a warm liquid-looking fill, rather than a flat rounded pill
+   bar identical to any web app's progress indicator. */
+#health-bar,
+#heat-bar {
+  background: linear-gradient(180deg, #050302, #1a1108);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px var(--brass-dark),
+    0 0 0 2px rgba(0, 0, 0, 0.6),
+    inset 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
 #health-bar {
   width: 200px;
   height: 16px;
-  background: rgba(0, 0, 0, 0.45);
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  border-radius: 8px;
-  overflow: hidden;
 }
 
 #health-fill {
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, #ff5b4d, #ffb14d);
+  background: linear-gradient(180deg, #ff8a5c 0%, #d43a1e 55%, #7a1f14 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 220, 190, 0.5);
   transition: width 0.2s ease;
 }
 
 #heat-bar {
   width: 200px;
   height: 10px;
-  background: rgba(0, 0, 0, 0.45);
-  border: 2px solid rgba(255, 120, 40, 0.6);
-  border-radius: 6px;
-  overflow: hidden;
 }
 
 #heat-bar.hidden {
@@ -76,17 +108,34 @@ body {
 #heat-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #ff8c1a, #ff2f2f);
+  background: linear-gradient(180deg, #ffcf6a 0%, var(--ember) 55%, #b3280a 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 235, 190, 0.5);
   transition: width 0.3s ease;
 }
 
 #gold-counter {
-  font-size: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 18px;
   font-weight: 700;
-  background: rgba(0, 0, 0, 0.35);
-  padding: 4px 10px;
-  border-radius: 8px;
+  letter-spacing: 0.02em;
+  color: var(--parchment);
+  background: linear-gradient(160deg, #241609, #120b04);
+  padding: 4px 12px 4px 8px;
+  border-radius: 4px;
   width: fit-content;
+  box-shadow:
+    0 0 0 1px var(--brass-dark),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08);
+}
+
+#gold-counter .icon-coin {
+  width: 18px;
+  height: 18px;
+  color: var(--brass-light);
+  flex: 0 0 auto;
 }
 
 #hud-top-right {
@@ -94,35 +143,99 @@ body {
   top: 16px;
   right: 16px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 18px;
-  font-weight: 600;
-  background: rgba(0, 0, 0, 0.35);
-  padding: 4px 10px;
-  border-radius: 8px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 
-#mute-btn,
-#chat-toggle-btn,
-#help-btn {
+#ship-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  color: var(--parchment);
+  background: linear-gradient(160deg, #241609, #120b04);
+  padding: 3px 10px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--brass-dark);
+}
+
+#hud-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Circular brass-rimmed instrument buttons — was a bare ~18px emoji glyph
+   with no hit-target sizing at all (measured ~22x18px, well under the
+   44x44 touch minimum used everywhere else in this HUD). Now a real
+   button with a dark gunmetal face and a brass ring, sized to the same
+   44px minimum as the shipyard's buy/slot buttons. */
+.icon-btn {
   pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
   border: none;
-  background: transparent;
-  font-size: 18px;
+  background: radial-gradient(circle at 35% 30%, #3a2a16, #150d05 75%);
+  box-shadow:
+    0 0 0 2px var(--brass-dark),
+    0 0 0 3px rgba(0, 0, 0, 0.5),
+    inset 0 1px 2px rgba(255, 255, 255, 0.12),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.6);
+  color: var(--brass-light);
   cursor: pointer;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
+}
+
+.icon-btn:active {
+  transform: translateY(1px);
+}
+
+.icon-btn .icon {
+  width: 19px;
+  height: 19px;
+}
+
+.icon-btn .icon-glyph {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.icon-sound.sound-off {
+  display: none;
+}
+.icon-btn.muted .icon-sound.sound-on {
+  display: none;
+}
+.icon-btn.muted .icon-sound.sound-off {
+  display: block;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {
+    box-shadow:
+      0 0 0 2px var(--brass-light),
+      0 0 0 3px rgba(0, 0, 0, 0.5),
+      inset 0 1px 2px rgba(255, 255, 255, 0.16),
+      inset 0 -2px 4px rgba(0, 0, 0, 0.6);
+  }
 }
 
 #minimap {
   position: absolute;
-  top: 62px;
+  top: 108px;
   right: 16px;
   width: 150px;
   height: 150px;
   border-radius: 50%;
   pointer-events: none;
+  box-shadow: 0 0 0 3px var(--brass-dark), 0 4px 10px rgba(0, 0, 0, 0.5);
   filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
 }
 
@@ -131,6 +244,7 @@ body {
   top: 70px;
   left: 50%;
   transform: translateX(-50%);
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 700;
   text-align: center;
@@ -162,73 +276,114 @@ body {
   display: none;
 }
 
+/* Shared modal-panel treatment for join/shipyard/tutorial: a stout wood
+   frame (twisted-rope border via a repeating diagonal gradient border-
+   image), a carved bevel, and a parchment-toned inner face instead of the
+   flat single-color rounded rectangle every one of these used before. */
+.panel-wood {
+  background: linear-gradient(165deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+  border: 6px solid;
+  border-image: repeating-linear-gradient(135deg, #8a6633 0 4px, #4a3216 4px 8px) 12;
+  border-radius: 4px;
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 0, 0, 0.25),
+    inset 0 2px 10px rgba(0, 0, 0, 0.25),
+    0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.panel-wood h1,
+.panel-wood h2,
+.panel-wood h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+  color: var(--blood);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.panel-wood h1::after,
+.panel-wood h2::after {
+  content: '';
+  display: block;
+  width: 55%;
+  height: 2px;
+  margin: 5px auto 0;
+  background: linear-gradient(90deg, transparent, var(--brass-dark), transparent);
+}
+
 #join-panel {
-  background: #16283b;
-  border: 2px solid #3a5a78;
-  border-radius: 14px;
   padding: 28px 32px;
   width: min(90vw, 360px);
-  color: #fff;
   text-align: center;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
 #join-panel h1 {
-  margin: 0 0 8px;
-  font-size: 26px;
-  color: #ffd27a;
+  margin: 0 0 12px;
+  font-size: 30px;
 }
 
 #join-status {
   margin: 0 0 18px;
   font-size: 13px;
-  opacity: 0.8;
+  opacity: 0.75;
 }
 
 #join-name {
   width: 100%;
   padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  border-radius: 3px;
+  border: 1px solid var(--wood-mid);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ink);
+  font-family: var(--font-display);
   font-size: 16px;
   margin-bottom: 14px;
   box-sizing: border-box;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 #join-name::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(27, 16, 6, 0.45);
 }
 
-#join-btn {
+/* Brass plank button — the "primary action" treatment shared by every
+   Set Sail button (join, shipyard close, tutorial close) instead of a
+   flat solid-color rounded rect. */
+.btn-primary {
   width: 100%;
   padding: 12px;
-  border-radius: 8px;
-  border: none;
-  background: #3ea36b;
-  color: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--wood-dark);
+  background: linear-gradient(180deg, var(--brass-light) 0%, var(--brass) 55%, var(--brass-dark) 100%);
+  color: var(--ink);
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 16px;
+  letter-spacing: 0.03em;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.25),
+    0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-#join-btn:disabled {
-  background: #556;
-  opacity: 0.6;
+.btn-primary:active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.btn-primary:disabled {
+  background: linear-gradient(180deg, #a3a3a3, #6b6b6b);
+  color: #eee;
+  opacity: 0.7;
   cursor: not-allowed;
 }
 
-/* The 6 upgrade rows + cannon builder can outgrow short phone viewports
-   (confirmed: 781px of content vs a 664px iPhone-8 viewport) once buy-btn
-   grew to the 44px touch-target minimum. Cap the panel to the viewport and
-   let only the middle section scroll — h2 and the "Set Sail" close button
-   stay outside #shipyard-scroll so the close action is always visible and
-   tappable without hunting for it mid-scroll. */
 #shipyard-panel {
-  background: #16283b;
-  border: 2px solid #3a5a78;
-  border-radius: 14px;
   padding: 24px 28px;
   width: min(90vw, 420px);
   /* A flat vh percentage (e.g. 90vh) caps the panel below its natural
@@ -240,15 +395,12 @@ body {
   max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
-  color: #fff;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
 #shipyard-panel h2 {
-  margin: 0 0 16px;
-  font-size: 24px;
+  margin: 0 0 12px;
+  font-size: 26px;
   text-align: center;
-  color: #ffd27a;
   flex: 0 0 auto;
 }
 
@@ -268,11 +420,12 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(27, 16, 6, 0.18);
 }
 
 .upgrade-title {
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 16px;
 }
@@ -285,31 +438,48 @@ body {
 
 .upgrade-desc {
   font-size: 12px;
-  opacity: 0.7;
+  opacity: 0.75;
   max-width: 220px;
 }
 
+/* Weathered plank button for the frequent secondary actions (one per
+   upgrade row) — a darker wood tone than .btn-primary's brass, so the
+   brass reads as reserved for the one primary action per screen. */
 .buy-btn {
-  background: #ffb14d;
-  border: none;
-  border-radius: 8px;
+  background: linear-gradient(180deg, var(--wood-light) 0%, var(--wood-mid) 70%, var(--wood-dark) 100%);
+  border: 1px solid var(--wood-dark);
+  border-radius: 4px;
   padding: 8px 12px;
+  color: var(--parchment);
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
   white-space: nowrap;
-  min-width: 84px;
+  min-width: 88px;
   /* Was ~32px tall (padding + line-height only) — under the 44px touch
      target minimum for the shipyard's primary purchase action. */
   min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.35);
+}
+
+.buy-btn .icon-coin {
+  width: 13px;
+  height: 13px;
+  color: var(--brass-light);
+  flex: 0 0 auto;
 }
 
 .buy-btn:disabled {
-  background: #556;
-  opacity: 0.5;
+  background: linear-gradient(180deg, #8a8a8a, #55554f);
+  color: #ddd;
+  opacity: 0.7;
   cursor: not-allowed;
 }
 
@@ -321,17 +491,21 @@ body {
 #cannon-builder h3 {
   margin: 0 0 10px;
   font-size: 15px;
-  color: #ffd27a;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
 }
 
+#cannon-builder h3::after {
+  display: none;
+}
+
 #cannon-slots-label {
   font-size: 12px;
   font-weight: 400;
-  opacity: 0.75;
-  color: #fff;
+  font-variant: normal;
+  opacity: 0.8;
+  color: var(--ink);
 }
 
 /* Grid, not flex: at narrow phone widths (down to the 320px old-SE), three
@@ -364,16 +538,21 @@ body {
   grid-row: 2;
 }
 
+/* A recessed parchment "compartment" rather than a translucent white
+   overlay card — carved-in look via an inset shadow instead of a flat
+   border. */
 .cannon-slot {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  padding: 8px 6px;
+  background: rgba(27, 16, 6, 0.06);
+  border-radius: 4px;
+  padding: 6px 6px;
   text-align: center;
+  box-shadow: inset 0 1px 4px rgba(27, 16, 6, 0.25), 0 0 0 1px rgba(27, 16, 6, 0.15);
 }
 
 .cannon-slot-label {
+  font-family: var(--font-display);
   font-size: 12px;
+  font-weight: 700;
   opacity: 0.85;
   margin-bottom: 6px;
 }
@@ -390,63 +569,56 @@ body {
      small at phone viewports alongside the layout-overflow fix above. */
   width: 44px;
   height: 44px;
-  border-radius: 8px;
-  border: none;
-  background: #3a5a78;
-  color: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--wood-dark);
+  background: linear-gradient(180deg, var(--brass-light), var(--brass) 55%, var(--brass-dark));
+  color: var(--ink);
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 700;
   cursor: pointer;
   line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -2px 3px rgba(0, 0, 0, 0.25);
+}
+
+.slot-btn:active {
+  transform: translateY(1px);
 }
 
 .slot-btn:disabled {
-  opacity: 0.35;
+  background: linear-gradient(180deg, #b7b7b7, #7c7c7c);
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .slot-count {
   min-width: 18px;
+  font-family: var(--font-display);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 17px;
 }
 
 .cannon-builder-hint {
   margin-top: 10px;
   font-size: 11.5px;
-  opacity: 0.65;
+  opacity: 0.7;
   line-height: 1.4;
 }
 
 #shipyard-close {
   margin-top: 18px;
   flex: 0 0 auto;
-  width: 100%;
-  padding: 12px;
-  border-radius: 8px;
-  border: none;
-  background: #3ea36b;
-  color: #fff;
-  font-weight: 700;
-  font-size: 16px;
-  cursor: pointer;
 }
 
 #tutorial-panel {
-  background: #16283b;
-  border: 2px solid #3a5a78;
-  border-radius: 14px;
   padding: 24px 28px;
   width: min(90vw, 440px);
-  color: #fff;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
 #tutorial-panel h2 {
   margin: 0 0 16px;
-  font-size: 24px;
+  font-size: 26px;
   text-align: center;
-  color: #ffd27a;
 }
 
 .tutorial-tips {
@@ -461,23 +633,12 @@ body {
 .tutorial-tips li {
   font-size: 14px;
   line-height: 1.5;
-  opacity: 0.9;
+  opacity: 0.92;
 }
 
 .tutorial-tips strong {
-  color: #ffd27a;
-}
-
-#tutorial-close {
-  width: 100%;
-  padding: 12px;
-  border-radius: 8px;
-  border: none;
-  background: #3ea36b;
-  color: #fff;
-  font-weight: 700;
-  font-size: 16px;
-  cursor: pointer;
+  font-variant: small-caps;
+  color: var(--blood);
 }
 
 /* Desktop shows keyboard hints by default; swapped for touch hints on
@@ -503,15 +664,27 @@ body {
   bottom: 130px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 20px;
   border-radius: 999px;
-  border: 2px solid #ffd27a;
-  background: rgba(30, 20, 5, 0.75);
-  color: #ffd27a;
+  border: 1px solid var(--wood-dark);
+  background: linear-gradient(180deg, rgba(60, 38, 16, 0.88), rgba(20, 12, 5, 0.88));
+  box-shadow: 0 0 0 2px var(--brass-dark), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+  color: var(--brass-light);
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 16px;
+  letter-spacing: 0.02em;
   pointer-events: auto;
   cursor: pointer;
+}
+
+#port-btn .icon-anchor {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
 }
 
 #port-btn.hidden {
@@ -533,9 +706,10 @@ body {
 }
 
 .chat-line {
-  background: rgba(0, 0, 0, 0.45);
+  background: linear-gradient(160deg, rgba(40, 26, 12, 0.75), rgba(15, 9, 4, 0.75));
+  box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.25);
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 13px;
   width: fit-content;
   max-width: 100%;
@@ -550,7 +724,7 @@ body {
 
 .chat-name {
   font-weight: 700;
-  color: #ffd27a;
+  color: var(--brass-light);
 }
 
 #chat-input-wrap {
@@ -568,10 +742,11 @@ body {
 #chat-input {
   width: 100%;
   padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--brass-dark);
+  background: rgba(10, 6, 2, 0.75);
+  color: var(--parchment);
+  font-family: var(--font-display);
   font-size: 14px;
   box-sizing: border-box;
 }
@@ -596,8 +771,8 @@ body {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.25));
+  box-shadow: 0 0 0 2px var(--brass-dark), inset 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 #joystick-knob {
@@ -605,7 +780,8 @@ body {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.5);
+  background: radial-gradient(circle at 35% 30%, var(--brass-light), var(--brass-dark));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -618,16 +794,30 @@ body {
   width: 76px;
   height: 76px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.5);
+  border: none;
+  box-shadow: 0 0 0 2px var(--brass-dark), inset 0 2px 3px rgba(255, 255, 255, 0.25), inset 0 -3px 6px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-display);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
   pointer-events: auto;
   color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+#fire-btn .icon,
+#boost-btn .icon {
+  width: 22px;
+  height: 22px;
 }
 
 #fire-btn {
   right: 24px;
-  background: rgba(220, 60, 40, 0.55);
+  background: radial-gradient(circle at 35% 30%, #ff8c4a, #7a1f14 80%);
 }
 
 #boost-btn {
@@ -635,7 +825,16 @@ body {
   bottom: 46px;
   width: 60px;
   height: 60px;
-  background: rgba(60, 140, 220, 0.55);
+  background: radial-gradient(circle at 35% 30%, #5fc9e0, #14536b 80%);
+}
+
+#fire-btn .icon {
+  width: 20px;
+  height: 20px;
+}
+#boost-btn .icon {
+  width: 16px;
+  height: 16px;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -663,25 +862,55 @@ body {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  background: rgba(20, 15, 10, 0.6);
-  color: #fff;
-  font-size: 17px;
-  line-height: 1;
+  border: none;
+  background: radial-gradient(circle at 35% 30%, #3a2a16, #150d05 75%);
+  box-shadow: 0 0 0 2px var(--brass-dark), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+  color: var(--brass-light);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.ammo-btn.active {
+  box-shadow: 0 0 0 2px var(--brass-light), 0 0 8px 1px rgba(240, 207, 106, 0.55), inset 0 1px 2px rgba(255, 255, 255, 0.15);
+}
+
+.ammo-icon {
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.ammo-btn.active {
-  border-color: #ffd27a;
-  background: rgba(255, 210, 122, 0.3);
+.ammo-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Fire shot gets its own ember tint rather than inheriting the default
+   brass — the other three ammo types (round/chain/grape) are all "metal",
+   fire is the one that should read hot. */
+.ammo-btn[data-ammo='fire'] .ammo-icon {
+  color: var(--ember);
+}
+
+/* Round shot is a plain cannonball — a solid CSS sphere reads better than
+   any icon glyph would at this size, and needs no SVG. */
+.ammo-icon-round {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #8a8a8a, #1a1a1a 75%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
 .ammo-key {
   position: absolute;
   bottom: -15px;
+  font-family: var(--font-display);
   font-size: 10px;
-  opacity: 0.65;
+  opacity: 0.7;
 }

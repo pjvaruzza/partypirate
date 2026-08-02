@@ -97,7 +97,7 @@ let muted = false;
 muteBtn?.addEventListener('click', () => {
   muted = !muted;
   sound.setMuted(muted);
-  muteBtn.textContent = muted ? '🔇' : '🔊';
+  muteBtn.classList.toggle('muted', muted);
 });
 
 // --- HUD / chat / network ----------------------------------------------------

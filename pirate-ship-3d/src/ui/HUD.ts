@@ -4,6 +4,17 @@ const UPGRADE_KEYS: UpgradeKey[] = ['sails', 'cannons', 'hull', 'powder'];
 const CANNON_SIDES: CannonSide[] = ['front', 'left', 'right'];
 const CLASS_NAMES: Record<ShipClass, string> = { sloop: 'Sloop', brigantine: 'Brigantine', galleon: 'Galleon' };
 
+/** Hand-authored "piece of eight" coin, matching the one baked into
+ * index.html's #gold-counter — kept as one constant so both places render
+ * identically instead of drifting, and so nothing here depends on emoji
+ * glyph coverage (which varies wildly across OS/browser font stacks). */
+const COIN_ICON =
+  '<svg class="icon icon-coin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+  '<circle cx="12" cy="12" r="10" fill="currentColor"/>' +
+  '<circle cx="12" cy="12" r="7" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1"/>' +
+  '<path d="M12 5.5v13M5.5 12h13M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" stroke="rgba(0,0,0,0.35)" stroke-width="0.8"/>' +
+  '</svg>';
+
 /** Purely a display for whatever EconomySnapshot the server last confirmed —
  * buy/loadout buttons just send requests over the network and wait for the
  * next snapshot to reflect the result, rather than mutating local state. */
@@ -113,7 +124,7 @@ export class HUD {
       this.classBuyBtn.disabled = true;
       this.classBuyBtn.textContent = 'MAXED';
     } else {
-      this.classBuyBtn.innerHTML = `Buy ${CLASS_NAMES[economy.nextClass]} <span class="cost">${economy.nextClassCost}</span> 🪙`;
+      this.classBuyBtn.innerHTML = `Buy ${CLASS_NAMES[economy.nextClass]} <span class="cost">${economy.nextClassCost}</span> ${COIN_ICON}`;
       this.classBuyBtn.disabled = economy.gold < economy.nextClassCost;
     }
 
@@ -132,7 +143,7 @@ export class HUD {
         if (levelEl) levelEl.textContent = `(Lv ${economy[key]})`;
         const cost = economy.costs[key];
         if (costEl) costEl.textContent = String(cost);
-        btn.innerHTML = `Buy <span class="cost">${cost}</span> 🪙`;
+        btn.innerHTML = `Buy <span class="cost">${cost}</span> ${COIN_ICON}`;
         btn.disabled = economy.gold < cost;
       }
     }
