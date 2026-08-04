@@ -509,6 +509,60 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   the silhouette. Verified with real sailing gameplay (not posed) at 1280×800
   and 390×844 @3x, plus frozen wave-crest and wave-trough shots at an
   identical camera, all three hull classes, and a broadside close-up.
+  **mobile-perf follow-up (checked both explicit handoffs from that pass):**
+  1. **Foam collar draw calls — real bug found and fixed.** The handoff
+     estimated "one transparent draw call per ship"; measured (wrapping
+     `renderer.getContext().drawElements`) it was actually **two** draw calls
+     submitting the same 148-triangle index buffer, 296 triangles per ship.
+     Root cause: three.js's `WebGLRenderer` renders any `transparent: true` +
+     `side: DoubleSide` material as two passes (back faces, then front) by
+     default, specifically to fix self-overlap alpha-sorting — see
+     `Material.forceSinglePass`'s own doc comment, which names flat
+     double-sided geometry (its example: grass sprites) as the exact case
+     where this buys nothing but doubles draw calls. The foam collar is
+     precisely that case: a thin flat ring with `depthWrite: false` already
+     set, so there's no self-sorting artifact for the two-pass split to
+     prevent in the first place. Fixed by setting `forceSinglePass: true` on
+     the foam material in `Ship.ts`. Verified pixel-identical at chase-cam,
+     broadside, and dead-astern (the closed-ring view the geometry comment
+     says matters most) before/after. At a realistic combat scene (1 player +
+     `MAX_ENEMIES`=6 bots, `server/src/GameRoom.ts`, measured via Playwright
+     at an iPhone-13 viewport, `renderer.info` on a synthetic 7-ship scene
+     matching `shipVisualOptions`' bot branch): **205 → 198 draw calls
+     (-3.4%), 77,531 → 76,495 triangles (-1.3%)**. Small in absolute terms at
+     7 ships, but it's a real per-ship inefficiency with zero visual cost to
+     fix, so it's fixed rather than left as a rounding error that would have
+     compounded if ship counts ever grew.
+  2. **Hull `DoubleSide` — measured, kept, not a waste.** The handoff wasn't
+     sure this had any visual benefit at this screen size. Rendered the same
+     hull with `THREE.FrontSide` at the game's actual chase-cam offset
+     (`(0, 5.2, 13)`, matching `main.ts`) and screenshotted: **FrontSide
+     produces a real, visible hole** — dead astern, directly behind the sail,
+     the recessed-bulwark interior face (a back face of the outward-wound
+     hull shell) disappears and open sea/sky shows through where `DoubleSide`
+     renders solid hull wall. Broadside view was pixel-identical between the
+     two (as expected — you only ever see front faces from the side), so the
+     cost is genuinely confined to the one view that has to look right.
+     Confirmed via `renderer.info` that `DoubleSide` on this **opaque**
+     material (unlike the foam's transparent one) causes no extra draw calls
+     or triangles — the three.js two-pass split only triggers for
+     `transparent: true`, so this is pure backface-culling behavior with a
+     real, measured visual payoff and no measured CPU-side cost. Left
+     unchanged.
+  3. **Hull triangle budget re-audited post-rework — ocean is still the
+     dominant cost, hull did not take over.** Measured with the same
+     7-ship combat scene: ocean+sky alone is 33,984 triangles (unaffected by
+     ship count); the 7-ship geometry itself (excluding the shadow-map pass,
+     which re-submits every `castShadow` mesh a second time from the light's
+     POV and is a property of `shadowMap.autoUpdate` defaulting to `true`,
+     not something this rework changed) adds 24,493 triangles — 3,499/ship
+     for a sloop up to 4,291/ship for a fully-loaded 2-mast galleon
+     (`hullClass: 2`, 8-gun loadout). Ocean remains the single largest mesh
+     by a wide margin (32,768 raw triangles) over any individual ship. Total
+     scene at realistic 7-ship combat, shadow pass included: 76,495
+     triangles / 198 draw calls — both comfortably inside the budget this
+     class of mobile GPU can sustain, and well below the pre-ocean-LOD-fix
+     171,239-triangle figure from the entry above. No action needed here.
 - [x] **Island self-shadow smear (S):** a follow-up "still seems pretty bad"
   complaint about overall graphics quality was never root-caused with a
   specific fix, so this pass was a genuinely fresh critical audit —

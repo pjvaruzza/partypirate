@@ -386,6 +386,19 @@ function buildFoamCollar(scale: number, hullClass: HullClass): THREE.Mesh {
       opacity: 0.85,
       depthWrite: false,
       side: THREE.DoubleSide,
+      // Three.js renders transparent + DoubleSide materials as TWO draw calls
+      // per frame by default (back faces, then front faces) to fix
+      // self-overlap sorting — see Material.forceSinglePass's own doc comment,
+      // which explicitly calls out flat double-sided geometry as the case
+      // where this buys nothing but doubles draw calls. That's exactly this
+      // mesh: a thin flat ring with depthWrite already off, so there's no
+      // self-sorting artifact for the two-pass split to prevent. Measured via
+      // renderer.getContext().drawElements: forceSinglePass:false submitted
+      // the same 148-triangle index buffer twice (296 tris / 2 draws per
+      // ship); forceSinglePass:true submits it once, confirmed pixel-identical
+      // at chase-cam, broadside, and dead-astern (the closed-ring view this
+      // mesh cares most about).
+      forceSinglePass: true,
     }),
   );
   mesh.name = 'foam';
