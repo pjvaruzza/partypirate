@@ -1,5 +1,9 @@
 # Playtest feedback — MANDATORY READING for every agent
 
+> See also **`DESIGN_INFLUENCES.md`** — structural lessons from games that
+> already solved the "why would I play one more round?" problem this project
+> has. Especially relevant to `gameplay-designer` and `art-director`.
+
 This is real feedback from the project owner after actually playing the build,
 not a synthetic checklist. Every agent must read this before starting work and
 must weigh its own output against it. It supersedes any assumption that
