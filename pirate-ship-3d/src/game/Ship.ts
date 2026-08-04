@@ -896,7 +896,13 @@ export class Ship {
     this.sailMesh.rotation.y = speedFrac * 0.15;
     // Never zero — a hove-to ship still has a wet waterline — but a moving
     // one throws noticeably more. Cheap scalar write, no allocation.
-    this.foamMat.opacity = 0.42 + speedFrac * 0.5 + Math.sin(time * 3.1 + this.bobPhase) * 0.05;
+    //
+    // Backed off from 0.42 + 0.5*speed: the ocean shader now draws its own
+    // bow collar and stern wash analytically (see Ocean.ts's wake loop), and
+    // at full speed the two summed to a hard, blown-out white ellipse around
+    // the hull. This collar's job is only the contact line where hull meets
+    // water; the volume of foam is the ocean's to draw.
+    this.foamMat.opacity = 0.34 + speedFrac * 0.3 + Math.sin(time * 3.1 + this.bobPhase) * 0.04;
   }
 
   forwardDirection(): THREE.Vector3 {

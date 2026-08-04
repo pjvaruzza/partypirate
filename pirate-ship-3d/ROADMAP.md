@@ -471,6 +471,13 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   `scale` in `syncVisual` and retuning the constant so exposed freeboard is
   roughly half the hull's total vertical extent across all classes, not
   just the one scale it happened to be tuned against originally.
+  **Correction (see "Ocean and islands rebuilt" at the end of this file):**
+  the `[x]` above is accurate about the *ships*, but its claims about the
+  *islands* ("64-segment shelves… ridge/gully relief… boulder clusters") are
+  now obsolete. That work was a better version of one silhouette — a
+  hemisphere on a sand cylinder — which the owner subsequently described as
+  "nubs popping out of the ocean." The islands described there no longer
+  exist; see the rebuild entry for what replaced them.
 - [x] **"Ships look partially submerged", third pass — actually fixed (M):**
   the complaint survived two `WATERLINE_OFFSET` retunes, so this pass
   deliberately refused to touch that constant again and instead instrumented
@@ -901,3 +908,171 @@ tomorrow** — there is still no session goal, no leaderboard, no daily
 anything; banked gold accumulates but nothing recognises it. Also still
 open: mobile hosting/testing on a real device, and graphics, which the owner
 has now rejected three times.
+
+---
+
+## Ocean and islands rebuilt (art pass 4 — response to feedback #4)
+
+> "The water just keeps showing wavy blue color gradient. doesnt really add
+> much. Islands are just nubs popping out of the ocean"
+
+Three previous art passes each fixed real, verified defects and were each
+rejected. This one did not look for a fourth defect. The diagnosis taken from
+`PLAYTEST_FEEDBACK.md` was that both systems' **ceilings** were the problem,
+and both were rebuilt rather than polished.
+
+### Baseline, confirmed before touching anything
+
+Screenshots at 1280x720 and 390x844@3x of the shipped build:
+
+- Water: one blue-to-lighter-blue ramp driven purely by wave height, with
+  broad soft white blobs on the swell tops (the crest-foam `smoothstep`) that
+  read as an oil slick. A ship at full speed left **no mark on the water at
+  all**.
+- Islands: every one of them a green hemisphere on a tan cylinder, differing
+  only in scale. The owner's word for it — "nub" — was exact.
+
+### Ocean (`src/game/Ocean.ts`)
+
+Geometry is deliberately **unchanged**: same warped follow-mesh, same three
+world-space waves, same `getHeightAt()`. Every floating object in the game
+samples that function, and the ship waterline has already been retuned three
+times; a displacement-mapped chop would have desynced it and re-opened a
+closed bug. All the new work is per-pixel.
+
+- **Depth-based colour.** The island loop now yields a signed distance to the
+  nearest coast, which drives an abyss → open-sea → shelf → sand-bottom ramp.
+  Water is bright turquoise over a beach and deep blue offshore. It goes
+  *negative* inside an atoll, which lights a lagoon up automatically.
+- **Ship wakes and bow spray** — the single most damning omission for a
+  sailing game. Fully analytic in the fragment shader: a Kelvin V at the
+  classic ~19.5° half-angle, a churned centreline wash (three noise octaves,
+  so it stays crisp at chase-camera range instead of smearing), and a bow
+  collar. No spawned meshes, no particles, no per-frame allocation. `main.ts`
+  feeds the six nearest moving ships through an allocation-free
+  `beginWakes()/addWake()/endWakes()` API backed by preallocated slots.
+- **Fresnel sky reflection** against a `skyAt()` function that mirrors
+  `Sky.ts`'s dome gradient, so the water reflects the sky that is actually
+  above it and goes mirror-like at grazing angles.
+- **Sun glitter.** Two specular lobes; the tight one (`pow(ndh, 620)`) breaks
+  into individual sparkles on the new fine chop instead of one wet sheen.
+- **Fine chop as a fragment-space normal**, four domain-warped directional
+  octaves, faded out between 70 and 260 units. The domain warp is
+  load-bearing: four straight sines alone laid down a regular cross-hatch
+  that reads as corduroy stripes running to the horizon from a low camera.
+- **Whitecaps retuned**: now gated on wave *steepness* as well as height and
+  torn up by high-frequency noise. Height alone paints every wide gentle
+  swell top solid white, which is exactly the milky-blob look being
+  complained about.
+- **Surf** widened into breaker lines with a bright waterline lip, following
+  the real coastline (below) rather than a circle.
+- Diffuse contrast raised 0.3/0.7 → 0.46/0.56: looking almost straight down
+  (most of the chase camera's lower screen) fresnel is ~0, so this term is
+  the only thing that can show ripple detail there.
+- `MAX_ISLANDS` 16 → 24. The world generates 19 islands now; three of them
+  had no shore colour or surf at all.
+
+### Islands (`IslandTerrain.ts`, `IslandProps.ts`, `Coastline.ts`, `GeoBuilder.ts`)
+
+`World.ts` is now just the seam between the server's island list and two new
+builders. The hemisphere and the sand cylinder are gone.
+
+- **Six archetypes** off one polar heightfield: volcanic cone (with crater
+  and ridge spurs), atoll with a real lagoon and passes through the ring,
+  cliff mesa (steep on one bearing, beach on the other), multi-peak ridge,
+  low sand cay, and a stepped terrace for the home port. Size gates which
+  families a given island can be. Elongation on the coastline means plenty of
+  them aren't round at all.
+- **Slope-aware colouring** with strata banding on exposed rock, and a baked
+  concavity term used as cheap AO. That last one matters more than it sounds:
+  directional light cannot distinguish a gully from a spur when both face the
+  sun, which is why the first cut of this heightfield still looked like a
+  smoothly tinted dome despite having real relief in it.
+- **Real dressing**: coconut palms with curved tapered trunks and drooping
+  folded fronds, scrub, boulders, offshore sea stacks, half-submerged
+  shipwrecks, broken stone watchtowers, and a plank jetty with barrels at the
+  home port. An island now reads as a place something happened.
+- **Determinism fixed.** The old code's comment claimed "every client builds
+  identical meshes from the same island list" while seeding its coastline
+  wobble from `Math.random()`. In multiplayer the land was a different shape
+  on every screen, and the ocean's surf ring never lined up with the beach it
+  was breaking on. Everything is now hashed from the island's server-sent
+  position, and `Coastline.ts` is the single source of truth that both the
+  terrain and the GLSL surf share.
+
+### Bugs found and root-caused during the rebuild
+
+- **Terrain rendered as a black silhouette.** Polar grid winding was
+  transposed — `(a,c,b)/(b,c,d)` gives face normals pointing straight *down*,
+  so every island was lit entirely from below while its (separately wound)
+  beach looked fine. Found by screenshot, not by inspection. Fixed to
+  `(a,b,d)/(a,d,c)`.
+- **Sea stacks were monoliths.** Height was scaled off the island's *peak*
+  (up to 0.65x) with a fixed thin radius, so a 30-unit island got a 2-unit-
+  wide, 16-unit-tall slab standing on its beach. Height is now tied to the
+  island's radius (0.1–0.28x) with a base radius 35–60% of height.
+- **A dead-straight foam edge ahead of the bow.** The Kelvin arms had no
+  forward falloff, so they ran at full strength to the `behind > -3` cutoff
+  and then simply stopped. Added `smoothstep(-2.4, -0.2, behind)`.
+- **Volcanic islands were spikes** at `radius * (0.95..1.3)` tall — taller
+  than wide. Now `radius * (0.6..0.92)`, plus ridge spurs so a cone stops
+  rendering as a geometrically perfect triangle.
+- **Wrecks read as shipping crates**: hull segments were 0.42 beam x 0.34
+  depth against 0.5 length, i.e. cubes. Now 0.26 x 0.22 against 0.62, four
+  segments, half-submerged at the waterline rather than beached.
+- `Ship.ts`'s foam collar opacity backed off `0.42 + 0.5*speed` →
+  `0.34 + 0.3*speed`: the ocean now draws its own bow collar, and the two
+  summed to a blown-out white ellipse around the hull at speed.
+
+### Cost, measured
+
+Measured directly against the same running server and the same 19-island
+layout, by swapping `World.ts` back to `HEAD` and re-running.
+
+| | old | new |
+|---|---|---|
+| island meshes (all 19) | 257 | **38** |
+| island triangles (all 19) | 71,082 | 89,212 |
+| shadow casters | 0 | 19 (palms/props) |
+
+Draw calls per island drop from ~13.5 to 2, because every palm, boulder,
+frond, stack, wreck and hut is baked into one vertex-coloured geometry by the
+new `GeoBuilder`. Against the same posed archipelago cameras: desktop
+574 → 390 and 544 → 404 calls; phone 379 → 256 and 248 → 168. Triangles rise
+~20–30% in exchange. That is a deliberate trade — this scene is draw-call
+bound on mobile long before it is triangle bound.
+
+Ocean geometry and draw calls are **unchanged**; its cost delta is fragment
+ALU only. Note that one part of that delta is negative: the island loop now
+early-outs on a squared-distance test, where before it ran an `atan` plus
+three `sin` per island **per pixel, unconditionally**, for all 19.
+
+### Verification
+
+Playwright, both viewports (1280x720 and 390x844 @3x), real join flow, real
+chase camera under sail — the shot the owner actually sees — plus posed
+close-ups. Debug hooks stripped and confirmed
+(`grep -c "__pg\|__probe\|__debug"` is 0 across `src/main.ts` and
+`src/game/*.ts`); `npx tsc --noEmit` and `npm run build` clean.
+
+### Honest assessment / handoffs
+
+This clears a far higher bar than the previous three passes: the chase-cam
+frame now has a visible wake, turquoise shallows, glitter, varied
+silhouettes and dressing. What is still holding the look back, in order:
+
+1. **Ships are now the weakest thing in frame.** With the sea and the land
+   rebuilt, the sloop is a small flat-brown hull with one plain sail. It
+   needs the same treatment: hull planking, colour, flags, decoration.
+2. **No LOD on islands.** Every island builds at full resolution regardless
+   of distance; a posed high camera over the archipelago hit 649 draw calls.
+   `mobile-perf` should weigh whether a distance-swapped low-poly terrain (or
+   dropping the props mesh past ~250 units) is worth it.
+3. **The wake rotates with the ship** rather than staying where it was laid,
+   so a hard turn swings the whole trail around. Correct for straight sailing
+   (verified), slightly wrong mid-turn. A proper fix needs a scrolling wake
+   buffer, which is a bigger change than this pass warranted.
+4. Salvage piles and the sanctuary ring are still placeholder additive discs
+   from `main.ts` (flagged by the previous session and still true); at close
+   range they blow out to white ellipses on the water and now clash with the
+   new wake foam.

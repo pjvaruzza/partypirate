@@ -77,13 +77,24 @@ scene.add(new THREE.HemisphereLight(0xdfefff, 0x1c3d2a, 0.5));
 // there), so 128 segments lands finer under the ship than the old uniform
 // 256 did, while roughly halving total triangles by not wasting density on
 // the outer band beyond the fog cutoff.
-const ocean = new Ocean(2200, 128, sun.position);
+// The sky/fog colours are handed to the ocean too: its fresnel reflection is
+// evaluated against the same gradient the skydome draws, so the water and the
+// sky above it can never disagree about what's being reflected.
+const SKY_HORIZON = 0xcfeaf6;
+const SKY_ZENITH = 0x2f6fb5;
+const ocean = new Ocean(2200, 128, sun.position, {
+  horizonColor: SKY_HORIZON,
+  zenithColor: SKY_ZENITH,
+  fogColor: SKY_HORIZON,
+  fogNear: 200,
+  fogFar: 950,
+});
 scene.add(ocean.mesh);
 
 // --- sky --------------------------------------------------------------------
 // Horizon colour matches scene.fog so distant geometry dissolves into the
 // sky rather than into a differently-coloured band.
-const sky = new Sky(sun.position, 0xcfeaf6, 0x2f6fb5);
+const sky = new Sky(sun.position, SKY_HORIZON, SKY_ZENITH);
 scene.add(sky.mesh);
 
 let world: World | null = null;
@@ -509,6 +520,57 @@ function handleEvents(events: GameEvent[]) {
   }
 }
 
+// --- ship wakes -------------------------------------------------------
+// The ocean draws wakes analytically in its fragment shader (no spawned
+// meshes, no particles), so all it needs each frame is where the fastest few
+// ships are and which way they're pointing. Only the nearest handful get one:
+// a wake 400 units away is a couple of pixels wide, and the fragment loop is
+// the one place ocean cost scales with ship count.
+// Roughly a fresh sloop's top speed (ShipSim.topSpeed's base of 9), so a
+// starting ship at full sail already gets a full-strength wake and upgraded
+// hulls saturate rather than scaling past it.
+const WAKE_SPEED_REFERENCE = 9;
+interface WakeCandidate { d: number; x: number; z: number; fx: number; fz: number; s: number }
+const wakeSlots: WakeCandidate[] = Array.from({ length: 6 }, () => ({ d: 0, x: 0, z: 0, fx: 0, fz: 1, s: 0 }));
+let wakeSlotCount = 0;
+
+function feedWakes(snapshot: ShipSnapshot[]) {
+  wakeSlotCount = 0;
+  for (const s of snapshot) {
+    if (!s.alive) continue;
+    const speed01 = Math.min(1, Math.abs(s.speed) / WAKE_SPEED_REFERENCE);
+    if (speed01 < 0.08) continue;
+    const dx = s.x - camera.position.x;
+    const dz = s.z - camera.position.z;
+    const d = dx * dx + dz * dz;
+    // Insertion sort into a fixed-size nearest-first buffer — no allocation,
+    // and the buffer is 6 long so this is a handful of comparisons.
+    let slot = wakeSlotCount < wakeSlots.length ? wakeSlotCount++ : -1;
+    if (slot < 0) {
+      let worst = 0;
+      for (let i = 1; i < wakeSlots.length; i++) if (wakeSlots[i].d > wakeSlots[worst].d) worst = i;
+      if (wakeSlots[worst].d <= d) continue;
+      slot = worst;
+    }
+    const w = wakeSlots[slot];
+    w.d = d;
+    w.x = s.x;
+    w.z = s.z;
+    // Reversing ships still push water the way they're pointed; the wake
+    // trails away from the direction of travel, hence the sign of speed.
+    const sign = s.speed < 0 ? -1 : 1;
+    w.fx = Math.sin(s.heading) * sign;
+    w.fz = Math.cos(s.heading) * sign;
+    w.s = speed01;
+  }
+  ocean.beginWakes();
+  for (let i = 0; i < wakeSlotCount; i++) {
+    const w = wakeSlots[i];
+    ocean.addWake(w.x, w.z, w.fx, w.fz, w.s);
+  }
+  ocean.endWakes();
+}
+
 // --- main loop ---------------------------------------------------------
 const clock = new THREE.Clock();
 let elapsed = 0;
@@ -607,6 +669,8 @@ function animate() {
         myShip = ship;
       }
     }
+
+    feedWakes(snapshot);
 
     for (const [id, ship] of renderedShips) {
       if (seenIds.has(id)) continue;
