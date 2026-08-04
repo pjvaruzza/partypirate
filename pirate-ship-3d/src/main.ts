@@ -635,8 +635,13 @@ function animate() {
   if (mine && myShip) {
     ocean.followTarget(mine.x, mine.z);
     hud.setHealth(mine.health, mine.maxHealth);
-    const nearPort = world!.isNearHomePort(new THREE.Vector3(mine.x, 0, mine.z));
-    portBtn.classList.toggle('hidden', !nearPort);
+    // Driven by the server's authoritative sanctuary test rather than the
+    // client's own radius: World.isNearHomePort defaults to radius+15 (37
+    // units) while the sanctuary is radius+45 (67), so a player could be
+    // safe and auto-banking with no way to open the shipyard. Safe, banked
+    // and "can shop" are deliberately one ring with one rule, and the ring
+    // only exists in one place now.
+    portBtn.classList.toggle('hidden', !network.state?.you.inSanctuary);
 
     const behind = myShip.forwardDirection().multiplyScalar(-1);
     const desiredCamPos = myShip.group.position
