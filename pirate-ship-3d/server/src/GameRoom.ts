@@ -30,15 +30,45 @@ import {
   type UpgradeKey,
 } from '../../src/shared/protocol';
 
-const MAX_ENEMIES = 6;
-const ENEMY_SPAWN_INTERVAL = 8;
+/** World scale, sized against a concrete target rather than inherited from
+ * the single-player prototype: **a full map crossing in ~90 seconds on a
+ * fresh sloop** (~40s fully upgraded), so a 5-15 minute mobile session fits
+ * several complete out-and-back runs instead of one commute.
+ *
+ *   2 * 400 / 9 = 88.9s crossing on a stock sloop (topSpeed 9)
+ *   400 / 9     = 44.4s centre-to-edge
+ *   2 * 250 / 9 = 55.6s for a mid-band raid and back to port
+ *
+ * The old 900 radius against a 6 unit/sec starting speed was 300s edge to
+ * edge. This is the change that makes banking unbanked gold a tense decision
+ * rather than a punishment. */
+export const DEFAULT_WORLD_RADIUS = 400;
+export const DEFAULT_ISLAND_COUNT = 18;
+const CRATE_COUNT = 24;
+
+/** Enemy density, also sized against a target: **something worth reacting to
+ * roughly every ~20 seconds of open sailing.** A bot notices you at
+ * DETECT_RANGE = 90, so a player at 9 units/sec sweeps a corridor
+ * 180 units wide at 1620 sq units/sec. Over π*400² = 502,655 sq units of
+ * water, N bots give a mean gap of 502655 / (1620 * N) seconds:
+ *
+ *   N =  6 (the old value, in the old 2.54M sq unit world): 261s  <- "theres no one around"
+ *   N = 14 (this value, in this world):                      22.2s
+ *
+ * Bots are capped globally, but the cap scales with population so a busier
+ * server doesn't feel thinner per-player. Solo: 10 + 4 = 14, matching the
+ * arithmetic above. */
+const ENEMY_BASE_COUNT = 10;
+const ENEMY_PER_PLAYER = 4;
+const ENEMY_MAX_COUNT = 22;
+const ENEMY_SPAWN_INTERVAL = 5;
 const CRATE_RESPAWN_DELAY = 15000;
 const PLAYER_RESPAWN_DELAY = 3;
 const BOT_DESPAWN_DELAY = 2.5;
 const BOOST_DURATION = 4;
 const BOOST_RECHARGE_TIME = 12;
 const HIT_RADIUS = 3;
-/** Ramming: driving your hull into a bot at speed damages both sides —
+/** Ramming: driving your hull into another ship at speed damages both sides —
  * rewards aggressive close-range play as an alternative to broadsides.
  * Tighter than HIT_RADIUS (which is deliberately forgiving for cannon aim)
  * since this is meant to read as literal hull contact. */
@@ -87,22 +117,80 @@ const RIVAL_FIRE_WINDOW_DEG = 48;
 const RIVAL_GOLD_MULT = 3;
 const RIVAL_SAIL_BONUS = 1.5;
 
-/** How bot/rival difficulty tier scales with spawn distance from home port
- * (dist=120 is the closest any regular bot spawns — see spawnBotWave/
- * spawnRivalCaptain). The old flat `dist/220` step gave a tier-0 band only
- * 100 units wide against a ~750-unit spawn range: on default worldRadius
- * 900 that's ~13% of spawns, so a first-time player's *nearest* fight was
- * overwhelmingly tier 1+ — whose HP lead outpaces the reload-speed edge a
- * stock sloop has, making it a losing engagement, not a hard-but-winnable
- * one. Widening the tier-0 band to ~25% trades a slightly smaller share of
- * tough tier-3 encounters at the map's edge (24% vs. 28%, unchanged in raw
- * difficulty) for a first 5-15 minute mobile session that isn't dominated
- * by fights a fresh ship can't realistically win. */
+/** How bot/rival difficulty tier scales with spawn distance from home port.
+ * A prior pass deliberately widened the tier-0 band to ~25% of spawns, so
+ * that a first-time player's *nearest* fight is winnable on a stock sloop
+ * (tier 1+ HP outpaces the reload-speed edge a fresh ship has). That intent
+ * is preserved here, but the step is now DERIVED from the spawn range
+ * instead of being a magic 190 that silently rescales with worldRadius:
+ * four equal quarter-bands means tier 0/1/2/3 each get exactly 25% of
+ * spawns at ANY world size, and tier 4 stays reserved for bosses.
+ *
+ *   worldRadius 400 -> spawn range [120, 370], step 62.5
+ *   tier 0: [120.0, 182.5)  25%
+ *   tier 1: [182.5, 245.0)  25%
+ *   tier 2: [245.0, 307.5)  25%
+ *   tier 3: [307.5, 370.0]  25%
+ *
+ * BOT_TIER_MIN_DIST also doubles as a bot-free approach lane around port —
+ * 120 units of clear water so a loaded ship's last leg home isn't an ambush
+ * gauntlet, which matters far more now that the hold can be lost. */
 const BOT_TIER_MIN_DIST = 120;
-const BOT_TIER_STEP = 190;
-function tierForDistance(dist: number): number {
-  return Math.min(4, Math.max(0, Math.floor((dist - BOT_TIER_MIN_DIST) / BOT_TIER_STEP)));
+const BOT_SPAWN_EDGE_MARGIN = 30;
+function tierForDistance(dist: number, step: number): number {
+  return Math.min(4, Math.max(0, Math.floor((dist - BOT_TIER_MIN_DIST) / step)));
 }
+
+/** --- Unbanked gold ------------------------------------------------------
+ * Gold earned at sea sits in the hold (`PlayerShip.hold`) until you reach
+ * port, which banks it permanently. Sink first and most of it spills as
+ * floating salvage anyone can collect. This is the tension the whole loop
+ * hangs on: every extra minute out makes your hold fatter, makes you a
+ * better target, and sharpens the keep-hunting-vs-run-for-port call.
+ *
+ * 70/30 rather than a clean 100% drop: some of the hoard must be *destroyed*
+ * on every sinking, or gold is merely conserved and dying costs the world
+ * nothing. The 30% burn means the ocean's unbanked wealth decays steadily,
+ * which is the pressure that pushes players to bank rather than to keep
+ * trading kills in a closed loop.
+ *
+ * The killer gets NO automatic cut — they have to physically stop and scoop
+ * it up, and a fat hold scatters into more chunks, so the richer the target
+ * the longer the looter is parked and exposed. That turns a kill into a
+ * contested scramble a third party can crash, rather than a clean payout. */
+const SALVAGE_DROP_FRACTION = 0.7;
+const SALVAGE_LIFETIME = 45;
+const SALVAGE_GOLD_PER_CHUNK = 60;
+const SALVAGE_MAX_CHUNKS = 5;
+/** Chunks are scattered on a ring around the wreck, never clustered on it,
+ * and the geometry is chosen so no two can ever sit inside one pickup
+ * diameter. The binding case is the 5-chunk cap: nominal angular spacing
+ * 2π/5 = 1.2566 rad, minus the full SALVAGE_SCATTER_JITTER spread, leaves a
+ * worst-case 0.9566 rad gap; at the minimum ring radius that's a chord of
+ *
+ *   2 * 12 * sin(0.9566 / 2) = 11.05 units  >  2 * 4.5 = 9 unit pickup diameter
+ *
+ * so scooping a fat hold is genuinely several separate passes, and the
+ * looter is parked and exposed for proportionally longer. (An earlier
+ * radius of 9 * [0.35, 1.0] with 0.7 jitter failed this: a 20k-drop Monte
+ * Carlo found chunks 4.24 units apart, i.e. two-for-one pickups.) */
+const SALVAGE_SCATTER_RADIUS = 12;
+const SALVAGE_SCATTER_SPREAD = 0.35;
+const SALVAGE_SCATTER_JITTER = 0.3;
+const SALVAGE_PICKUP_RADIUS = 4.5;
+
+/** --- PvP safety ---------------------------------------------------------
+ * Open PvP anywhere EXCEPT a sanctuary ring around home port, where no
+ * damage flows in *either* direction. Making it symmetric is the point: a
+ * one-way shield would just be a sniper nest you could camp. Max cannon
+ * range is ~36 units (26 u/s muzzle speed, ~1.4s flight), so a 22+45 = 67
+ * unit sanctuary can't be shot into from outside it, or out of from the
+ * island itself.
+ *
+ * Respawn immunity covers the case of leaving the ring immediately after a
+ * death, and ends the instant you fire — you can't shoot from behind it. */
+const PORT_SANCTUARY_EXTRA = 45;
+const SPAWN_PROTECTION_TIME = 6;
 
 /** Ammo types are trade-offs, not upgrades — each deals less base damage
  * than round shot in exchange for a situational effect, so round shot stays
@@ -125,9 +213,18 @@ const HEAT_MAX = 100;
 const HEAT_PER_GOLD_EARNED = 0.15;
 const HEAT_DECAY_PER_SEC = 1.2;
 const HEAT_DECAY_PER_SEC_AT_PORT = 20;
-const HOME_PORT_HEAT_RADIUS_EXTRA = 15;
 const HUNTER_CHECK_INTERVAL = 12;
 const HUNTER_SPAWN_CHANCE_AT_MAX_HEAT = 0.5;
+/** Sinking another captain is the villain move, so it heats you far harder
+ * than any bot kill: three player kills (105) tops out the wanted level,
+ * which both summons hunters and makes every bot in range prefer you as a
+ * target. Prey on people and the world starts preying on you. */
+const HEAT_PER_PLAYER_KILL = 35;
+/** How much a hot player outweighs proximity in bot target selection: at
+ * HEAT_MAX a bot will chase you over a cold player up to 2x closer. This is
+ * what stops bots being farmable cover — you can't hide behind one once
+ * you're the most wanted ship on the water. */
+const BOT_HEAT_ATTRACTION = 1.0;
 
 const BASE_COST: Record<UpgradeKey, number> = { sails: 40, cannons: 50, hull: 45, powder: 60 };
 const COST_GROWTH = 1.55;
@@ -184,6 +281,15 @@ export interface PlayerShip extends BaseShip {
   socket: WebSocket;
   input: InputState;
   economy: PersistedEconomy;
+  /** Unbanked gold. Everything earned at sea lands here; entering the port
+   * sanctuary moves it into `economy.gold` (banked, persisted, and the only
+   * currency the shipyard accepts). Sinking spills most of it as salvage —
+   * see dropSalvage. Deliberately NOT persisted: the hold is a per-voyage
+   * stake, and making it survive a logout would defeat the point. */
+  hold: number;
+  /** Seconds of post-respawn damage immunity remaining; cleared the moment
+   * the player fires — see updatePlayer / isProtected. */
+  spawnProtection: number;
   boostCharge: number;
   boostTimer: number;
   boostRechargeTimer: number;
@@ -210,22 +316,52 @@ export interface BotShip extends BaseShip {
 
 export type AnyShip = PlayerShip | BotShip;
 
+/** A floating pile of spilled hold gold — see SALVAGE_* above. */
+export interface SalvageState {
+  id: string;
+  x: number;
+  z: number;
+  value: number;
+  ownerName: string;
+  ttl: number;
+}
+
 export class GameRoom {
   readonly worldRadius: number;
   readonly islands: IslandInfo[];
   crates: CrateState[] = [];
   cannonballs: CannonballState[] = [];
+  salvage: SalvageState[] = [];
   ships = new Map<string, AnyShip>();
   events: GameEvent[] = [];
 
   private enemySpawnTimer = 0;
   private rivalSpawnTimer = 0;
 
-  constructor(worldRadius = 900, islandCount = 12) {
+  constructor(worldRadius = DEFAULT_WORLD_RADIUS, islandCount = DEFAULT_ISLAND_COUNT) {
     this.worldRadius = worldRadius;
     this.islands = generateIslands(islandCount, worldRadius);
-    for (let i = 0; i < 18; i++) this.crates.push(spawnCrate(this.islands, worldRadius));
-    for (let i = 0; i < 4; i++) this.spawnBotWave();
+    for (let i = 0; i < CRATE_COUNT; i++) this.crates.push(spawnCrate(this.islands, worldRadius));
+    for (let i = 0; i < ENEMY_BASE_COUNT; i++) this.spawnBotWave();
+  }
+
+  /** Bot population target, scaled with connected players so a busier server
+   * doesn't feel emptier per captain — see ENEMY_* above for the arithmetic
+   * tying this to a ~20s mean encounter gap. */
+  private maxEnemies(): number {
+    let players = 0;
+    for (const s of this.ships.values()) if (!s.isBot && s.disconnectedAt === null) players++;
+    return Math.min(ENEMY_MAX_COUNT, ENEMY_BASE_COUNT + ENEMY_PER_PLAYER * players);
+  }
+
+  /** Bots spawn in an annulus [BOT_TIER_MIN_DIST, worldRadius - margin]; the
+   * tier bands are quarters of this range — see tierForDistance. */
+  private botSpawnRange(): number {
+    return Math.max(4, this.worldRadius - BOT_TIER_MIN_DIST - BOT_SPAWN_EDGE_MARGIN);
+  }
+
+  private botTierStep(): number {
+    return this.botSpawnRange() / 4;
   }
 
   addPlayer(id: string, name: string, socket: WebSocket, economy: PersistedEconomy): PlayerShip {
@@ -252,6 +388,8 @@ export class GameRoom {
       socket,
       input: { turn: 0, throttle: 0, fire: false, boost: false },
       economy,
+      hold: 0,
+      spawnProtection: SPAWN_PROTECTION_TIME,
       boostCharge: economy.powder,
       boostTimer: 0,
       boostRechargeTimer: 0,
@@ -300,10 +438,10 @@ export class GameRoom {
 
   private spawnBotWave() {
     const botCount = [...this.ships.values()].filter((s) => s.isBot).length;
-    if (botCount >= MAX_ENEMIES) return;
+    if (botCount >= this.maxEnemies()) return;
     const angle = Math.random() * Math.PI * 2;
-    const dist = BOT_TIER_MIN_DIST + Math.random() * (this.worldRadius - 150);
-    const tier = tierForDistance(dist);
+    const dist = BOT_TIER_MIN_DIST + Math.random() * this.botSpawnRange();
+    const tier = tierForDistance(dist, this.botTierStep());
     const stats: ShipStats = { sailLevel: tier, cannonLevel: tier, hullLevel: tier };
     const id = randomUUID();
     const x = Math.cos(angle) * dist;
@@ -395,8 +533,8 @@ export class GameRoom {
     const name = available[Math.floor(Math.random() * available.length)];
 
     const angle = Math.random() * Math.PI * 2;
-    const dist = BOT_TIER_MIN_DIST + Math.random() * (this.worldRadius - 150);
-    const tier = tierForDistance(dist);
+    const dist = BOT_TIER_MIN_DIST + Math.random() * this.botSpawnRange();
+    const tier = tierForDistance(dist, this.botTierStep());
     const stats: ShipStats = { sailLevel: tier + RIVAL_SAIL_BONUS, cannonLevel: tier, hullLevel: tier };
     const id = randomUUID();
     const x = Math.cos(angle) * dist;
@@ -492,6 +630,10 @@ export class GameRoom {
     const nextClass = SHIP_CLASS_ORDER[SHIP_CLASS_ORDER.indexOf(ship.economy.shipClass) + 1] ?? null;
     return {
       gold: ship.economy.gold,
+      hold: ship.hold,
+      holdAtRisk: Math.floor(ship.hold * SALVAGE_DROP_FRACTION),
+      inSanctuary: this.isInSanctuary(ship.body.x, ship.body.z),
+      spawnProtection: ship.spawnProtection,
       sails: ship.economy.sails,
       cannons: ship.economy.cannons,
       hull: ship.economy.hull,
@@ -562,16 +704,108 @@ export class GameRoom {
       const ammoType = input.ammoType ?? 'round';
       this.fireShip(ship, ammoType);
       ship.cannonCooldown = cannonReload(ship.stats) * (ammoType === 'chain' ? CHAIN_RELOAD_MULT : 1);
+      // Firing forfeits respawn immunity — it's there to survive the first
+      // few seconds after a sinking, not to be a shield you shoot from.
+      ship.spawnProtection = 0;
     }
   }
 
+  /** All at-sea income routes through here so nothing can accidentally pay
+   * straight into the banked pile — that separation is the whole point of
+   * the hold. `heats` is false for passive pickups (crates, treasure) and
+   * true for anything earned by violence. */
+  private addToHold(ship: PlayerShip, amount: number, heats: boolean) {
+    if (amount <= 0) return;
+    ship.hold += amount;
+    if (heats) ship.heat = Math.min(HEAT_MAX, ship.heat + amount * HEAT_PER_GOLD_EARNED);
+    this.events.push({ type: 'gold', amount, for: ship.id });
+  }
+
+  /** Entering the port sanctuary banks the hold instantly — no docking
+   * animation, no standing still. On a touch screen, "sail into the ring"
+   * is a gesture a thumb can execute; "hold position for 3 seconds" is not. */
+  private updateBanking() {
+    for (const ship of this.ships.values()) {
+      if (ship.isBot || !ship.alive || ship.hold <= 0) continue;
+      if (!this.isInSanctuary(ship.body.x, ship.body.z)) continue;
+      const amount = Math.floor(ship.hold);
+      ship.hold = 0;
+      if (amount <= 0) continue;
+      ship.economy.gold += amount;
+      this.persist(ship);
+      this.events.push({ type: 'banked', amount, for: ship.id });
+      this.events.push({ type: 'message', text: `Banked ${amount} gold — safe ashore.`, duration: 2200, for: ship.id });
+    }
+  }
+
+  /** Spills SALVAGE_DROP_FRACTION of the hold into floating chunks and
+   * destroys the rest. Returns the amount that actually hit the water.
+   * Chunk values are integers that sum to EXACTLY the dropped amount — a
+   * naive even split would quietly lose gold to rounding on every death. */
+  private dropSalvage(ship: PlayerShip): number {
+    const dropped = Math.floor(ship.hold * SALVAGE_DROP_FRACTION);
+    ship.hold = 0;
+    if (dropped <= 0) return 0;
+
+    const chunks = Math.max(1, Math.min(SALVAGE_MAX_CHUNKS, Math.ceil(dropped / SALVAGE_GOLD_PER_CHUNK)));
+    const base = Math.floor(dropped / chunks);
+    const remainder = dropped - base * chunks;
+    for (let i = 0; i < chunks; i++) {
+      const angle = (i / chunks) * Math.PI * 2 + (Math.random() - 0.5) * SALVAGE_SCATTER_JITTER;
+      const r = SALVAGE_SCATTER_RADIUS * (1 + Math.random() * SALVAGE_SCATTER_SPREAD);
+      this.salvage.push({
+        id: randomUUID(),
+        x: ship.body.x + Math.cos(angle) * r,
+        z: ship.body.z + Math.sin(angle) * r,
+        value: base + (i < remainder ? 1 : 0),
+        ownerName: ship.name,
+        ttl: SALVAGE_LIFETIME,
+      });
+    }
+    return dropped;
+  }
+
+  private updateSalvage(dt: number) {
+    if (this.salvage.length === 0) return;
+    for (const pile of this.salvage) {
+      pile.ttl -= dt;
+      if (pile.ttl > 0) continue;
+      pile.value = 0;
+    }
+    for (const ship of this.ships.values()) {
+      if (ship.isBot || !ship.alive) continue;
+      for (const pile of this.salvage) {
+        if (pile.value <= 0) continue;
+        if (Math.hypot(pile.x - ship.body.x, pile.z - ship.body.z) >= SALVAGE_PICKUP_RADIUS) continue;
+        // Recovered gold lands UNBANKED, and heats you like any other spoils:
+        // looting a kill makes you the next fat target, it doesn't cash out.
+        this.addToHold(ship, pile.value, true);
+        this.events.push({
+          type: 'message',
+          text: `Recovered ${pile.value} gold from ${pile.ownerName}'s wreck`,
+          duration: 1600,
+          for: ship.id,
+        });
+        pile.value = 0;
+      }
+    }
+    this.salvage = this.salvage.filter((p) => p.value > 0 && p.ttl > 0);
+  }
+
   private updateBot(bot: BotShip, players: PlayerShip[], dt: number) {
+    // Heat-weighted nearest, not raw nearest: bots ignore anyone protected
+    // (in port / freshly respawned / disconnected), and a wanted captain
+    // outweighs proximity by up to 2x at HEAT_MAX. Without this, a player
+    // could park next to a bot and use it as free cover from other players,
+    // and bots would stay irrelevant to whoever's actually causing trouble.
     let nearest: PlayerShip | null = null;
-    let nearestDist = Infinity;
+    let bestScore = Infinity;
     for (const p of players) {
+      if (this.isProtected(p)) continue;
       const d = Math.hypot(p.body.x - bot.body.x, p.body.z - bot.body.z);
-      if (d < nearestDist) {
-        nearestDist = d;
+      const score = d / (1 + (p.heat / HEAT_MAX) * BOT_HEAT_ATTRACTION);
+      if (score < bestScore) {
+        bestScore = score;
         nearest = p;
       }
     }
@@ -625,7 +859,10 @@ export class GameRoom {
     ship.health = ship.maxHealth;
     ship.alive = true;
     ship.deathTimer = 0;
-    this.events.push({ type: 'message', text: 'Rescued! Back at port.', duration: 2500, for: ship.id });
+    ship.sailDisableTimer = 0;
+    ship.burnTicksRemaining = 0;
+    ship.spawnProtection = SPAWN_PROTECTION_TIME;
+    this.events.push({ type: 'message', text: 'Rescued! Back at port — banked gold is untouched.', duration: 2500, for: ship.id });
   }
 
   private updateCannonballs(dt: number) {
@@ -637,9 +874,17 @@ export class GameRoom {
     }
   }
 
-  /** Marks `ship` as sunk and, if it was a bot, pays out gold/heat/treasure-map
-   * rewards to `killer` — shared between cannonball kills (resolveCombat) and
-   * ramming kills (resolveRamming) so both credit the same way. */
+  /** Marks `ship` as sunk and settles the payout — shared between cannonball
+   * kills (resolveCombat), ram kills (resolveRamming) and burn-tick kills
+   * (updateStatusEffects) so every path credits identically.
+   *
+   * Bot kills pay gold into the killer's HOLD (unbanked). Player kills pay
+   * the killer NOTHING directly: the reward is the victim's spilled hold,
+   * which has to be physically collected. That's not squeamishness, it's the
+   * anti-griefing property that falls out of the economy instead of needing
+   * a rule — hunting a loaded captain is lucrative, and hunting a broke one
+   * (a beginner, or someone who just banked) pays literally zero while still
+   * costing HEAT_PER_PLAYER_KILL heat. Spawn-camping the poor is a net loss. */
   private killShip(ship: AnyShip, killer: AnyShip | undefined) {
     ship.alive = false;
     ship.deathTimer = 0;
@@ -647,9 +892,7 @@ export class GameRoom {
 
     if (ship.isBot) {
       if (killer && !killer.isBot) {
-        killer.economy.gold += ship.goldReward;
-        killer.heat = Math.min(HEAT_MAX, killer.heat + ship.goldReward * HEAT_PER_GOLD_EARNED);
-        this.events.push({ type: 'gold', amount: ship.goldReward, for: killer.id });
+        this.addToHold(killer, ship.goldReward, true);
         this.events.push({
           type: 'message',
           text: ship.isBoss
@@ -679,7 +922,30 @@ export class GameRoom {
         this.persist(killer);
       }
     } else {
-      this.events.push({ type: 'message', text: 'Your ship has sunk!', duration: 3000, for: ship.id });
+      const dropped = this.dropSalvage(ship);
+      this.events.push({
+        type: 'message',
+        text:
+          dropped > 0
+            ? `Sunk! ${dropped} gold spilled into the sea — your banked gold is safe.`
+            : 'Sunk! Your hold was empty, so nothing was lost.',
+        duration: 3200,
+        for: ship.id,
+      });
+
+      if (killer && !killer.isBot && killer.id !== ship.id) {
+        killer.heat = Math.min(HEAT_MAX, killer.heat + HEAT_PER_PLAYER_KILL);
+        this.events.push({
+          type: 'message',
+          text:
+            dropped > 0
+              ? `You sank ${ship.name}! ${dropped} gold is in the water — go get it.`
+              : `You sank ${ship.name}, but their hold was empty.`,
+          duration: 3200,
+          for: killer.id,
+        });
+        this.events.push({ type: 'message', text: `${killer.name} sank ${ship.name}!`, duration: 3000 });
+      }
     }
   }
 
@@ -709,12 +975,62 @@ export class GameRoom {
     }
   }
 
+  /** Hull radius used for both cannon hits and ram contact. */
+  private hullScale(ship: AnyShip): number {
+    return ship.isBot ? 0.9 : SHIP_CLASS_SCALE[ship.economy.shipClass];
+  }
+
+  /** Inside this ring around home port, no damage flows in EITHER direction
+   * and the hold banks automatically. Also the fast heat-decay ring — same
+   * radius on purpose, so "safe", "banked" and "cooling off" are one place a
+   * player can learn once instead of three overlapping invisible circles. */
+  private isInSanctuary(x: number, z: number): boolean {
+    const home = this.islands.find((isl) => isl.isHomePort);
+    if (!home) return false;
+    return Math.hypot(x - home.x, z - home.z) < home.radius + PORT_SANCTUARY_EXTRA;
+  }
+
+  /** Public read-only view of isProtected for the snapshot builder. */
+  isShipProtected(ship: AnyShip): boolean {
+    return this.isProtected(ship);
+  }
+
+  /** Can neither deal nor take damage. Bots are never protected. */
+  private isProtected(ship: AnyShip): boolean {
+    if (ship.isBot) return false;
+    // Frozen ghost ships (socket dropped, inside the reconnect grace window)
+    // would otherwise be free kills — trivially farmable, and it would punish
+    // exactly the mobile players most likely to drop a connection.
+    if (ship.disconnectedAt !== null) return true;
+    if (ship.spawnProtection > 0) return true;
+    return this.isInSanctuary(ship.body.x, ship.body.z);
+  }
+
+  /** PvP is fully open: player cannonballs now damage other players anywhere
+   * outside the port sanctuary. What's still filtered out is bot-on-bot fire
+   * (bots would otherwise wipe each other out in crossfire and the world
+   * would empty itself) and anything involving a protected ship. */
+  private canDamage(attacker: AnyShip | undefined, target: AnyShip): boolean {
+    if (!target.alive) return false;
+    if (!attacker) return !this.isProtected(target);
+    if (attacker.id === target.id) return false;
+    if (attacker.isBot && target.isBot) return false;
+    return !this.isProtected(attacker) && !this.isProtected(target);
+  }
+
   private resolveCombat() {
     for (const ball of this.cannonballs) {
       if (!ball.alive) continue;
+      const owner = this.ships.get(ball.ownerId);
+      // A shot fired before the shooter reached safety still can't land once
+      // they're inside it — resolved at impact, not at launch, so ducking
+      // into the sanctuary genuinely disengages you from a fight.
+      if (owner && this.isProtected(owner)) continue;
       for (const ship of this.ships.values()) {
-        if (!ship.alive || ship.id === ball.ownerId || ship.isBot === ball.ownerIsBot) continue;
-        const hitRadius = HIT_RADIUS * (ship.isBot ? 0.9 : SHIP_CLASS_SCALE[ship.economy.shipClass]);
+        if (ship.id === ball.ownerId) continue;
+        if (ship.isBot && ball.ownerIsBot) continue;
+        if (!this.canDamage(owner, ship)) continue;
+        const hitRadius = HIT_RADIUS * this.hullScale(ship);
         if (Math.hypot(ship.body.x - ball.x, ship.body.z - ball.z) >= hitRadius) continue;
 
         const damage = this.ammoDamage(ball);
@@ -738,67 +1054,61 @@ export class GameRoom {
     this.cannonballs = this.cannonballs.filter((b) => b.alive);
   }
 
-  /** Driving your hull into a bot at speed damages both sides — see the
-   * RAM_* constants above. Only player-vs-bot pairs collide this way (no
-   * PvP, and bot-vs-bot ramming isn't worth the complexity). */
+  /** Driving your hull into another ship at speed damages both sides — see
+   * the RAM_* constants above. Now runs over every ordered pair where at
+   * least one side is a player, so player-vs-player ramming works exactly
+   * like player-vs-bot did. Bot-vs-bot is still excluded (bots would grind
+   * each other down on patrol and empty the world). Ramming stays a genuine
+   * trade-off in PvP for the same reason it is against bots: it costs you
+   * the same damage you deal, so it's the move for finishing a ship that's
+   * already hurt worse than you, not a strictly better broadside. */
   private resolveRamming() {
-    const players = [...this.ships.values()].filter((s): s is PlayerShip => !s.isBot && s.alive);
-    const bots = [...this.ships.values()].filter((s): s is BotShip => s.isBot && s.alive);
+    const candidates = [...this.ships.values()].filter((s) => s.alive && !this.isProtected(s));
 
-    for (const player of players) {
-      if (player.ramCooldown > 0) continue;
-      for (const bot of bots) {
-        if (bot.ramCooldown > 0 || !bot.alive) continue;
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        const a = candidates[i];
+        const b = candidates[j];
+        if (a.isBot && b.isBot) continue;
+        if (!a.alive || !b.alive || a.ramCooldown > 0 || b.ramCooldown > 0) continue;
 
-        const dx = bot.body.x - player.body.x;
-        const dz = bot.body.z - player.body.z;
+        const dx = b.body.x - a.body.x;
+        const dz = b.body.z - a.body.z;
         const dist = Math.hypot(dx, dz);
-        const playerScale = SHIP_CLASS_SCALE[player.economy.shipClass];
-        const minDist = RAM_CONTACT_RADIUS * (playerScale + 0.9);
+        const minDist = RAM_CONTACT_RADIUS * (this.hullScale(a) + this.hullScale(b));
         if (dist >= minDist) continue;
 
-        const playerVX = Math.sin(player.body.heading) * player.body.speed;
-        const playerVZ = Math.cos(player.body.heading) * player.body.speed;
-        const botVX = Math.sin(bot.body.heading) * bot.body.speed;
-        const botVZ = Math.cos(bot.body.heading) * bot.body.speed;
-        const relSpeed = Math.hypot(playerVX - botVX, playerVZ - botVZ);
+        const aVX = Math.sin(a.body.heading) * a.body.speed;
+        const aVZ = Math.cos(a.body.heading) * a.body.speed;
+        const bVX = Math.sin(b.body.heading) * b.body.speed;
+        const bVZ = Math.cos(b.body.heading) * b.body.speed;
+        const relSpeed = Math.hypot(aVX - bVX, aVZ - bVZ);
         if (relSpeed < RAM_MIN_SPEED) continue;
 
         const damage = Math.min(RAM_MAX_DAMAGE, relSpeed * RAM_DAMAGE_PER_SPEED);
-        player.health = Math.max(0, player.health - damage);
-        bot.health = Math.max(0, bot.health - damage);
-        player.ramCooldown = RAM_COOLDOWN;
-        bot.ramCooldown = RAM_COOLDOWN;
+        a.health = Math.max(0, a.health - damage);
+        b.health = Math.max(0, b.health - damage);
+        a.ramCooldown = RAM_COOLDOWN;
+        b.ramCooldown = RAM_COOLDOWN;
 
         const nx = dist < 0.001 ? 1 : dx / dist;
         const nz = dist < 0.001 ? 0 : dz / dist;
         const overlap = minDist - dist;
-        player.body.x -= nx * overlap * 0.5;
-        player.body.z -= nz * overlap * 0.5;
-        bot.body.x += nx * overlap * 0.5;
-        bot.body.z += nz * overlap * 0.5;
-        player.body.speed *= RAM_KNOCKBACK_SPEED_MULT;
-        bot.body.speed *= RAM_KNOCKBACK_SPEED_MULT;
+        a.body.x -= nx * overlap * 0.5;
+        a.body.z -= nz * overlap * 0.5;
+        b.body.x += nx * overlap * 0.5;
+        b.body.z += nz * overlap * 0.5;
+        a.body.speed *= RAM_KNOCKBACK_SPEED_MULT;
+        b.body.speed *= RAM_KNOCKBACK_SPEED_MULT;
 
-        const midX = (player.body.x + bot.body.x) / 2;
-        const midZ = (player.body.z + bot.body.z) / 2;
+        const midX = (a.body.x + b.body.x) / 2;
+        const midZ = (a.body.z + b.body.z) / 2;
         this.events.push({ type: 'ram', x: midX, y: 1, z: midZ });
-        this.events.push({ type: 'hit', x: bot.body.x, y: 1, z: bot.body.z, targetId: bot.id, ownerId: player.id, damage });
-        this.events.push({
-          type: 'hit',
-          x: player.body.x,
-          y: 1,
-          z: player.body.z,
-          targetId: player.id,
-          ownerId: bot.id,
-          damage,
-        });
+        this.events.push({ type: 'hit', x: b.body.x, y: 1, z: b.body.z, targetId: b.id, ownerId: a.id, damage });
+        this.events.push({ type: 'hit', x: a.body.x, y: 1, z: a.body.z, targetId: a.id, ownerId: b.id, damage });
 
-        if (bot.health <= 0) this.killShip(bot, player);
-        if (player.health <= 0) {
-          this.killShip(player, bot);
-          break;
-        }
+        if (b.health <= 0) this.killShip(b, a);
+        if (a.health <= 0) this.killShip(a, b);
       }
     }
   }
@@ -809,10 +1119,9 @@ export class GameRoom {
       for (const crate of this.crates) {
         if (crate.collected || Math.hypot(crate.x - ship.body.x, crate.z - ship.body.z) >= CRATE_RADIUS) continue;
         crate.collected = true;
-        ship.economy.gold += crate.value;
-        this.events.push({ type: 'gold', amount: crate.value, for: ship.id });
-        this.events.push({ type: 'message', text: `+${crate.value} gold`, duration: 1200, for: ship.id });
-        this.persist(ship);
+        // Crates are passive pickups: they fill the hold but don't raise heat.
+        this.addToHold(ship, crate.value, false);
+        this.events.push({ type: 'message', text: `+${crate.value} gold to hold`, duration: 1200, for: ship.id });
         setTimeout(() => {
           const idx = this.crates.indexOf(crate);
           if (idx >= 0) this.crates[idx] = spawnCrate(this.islands, this.worldRadius);
@@ -839,23 +1148,20 @@ export class GameRoom {
         TREASURE_REWARD_CAP,
         TREASURE_BASE_REWARD + ship.economy.treasureHuntsCompleted * TREASURE_REWARD_PER_HUNT,
       );
-      ship.economy.gold += reward;
+      // Into the hold, not the bank — a dug-up chest is the single fattest
+      // thing you can be carrying, which is exactly when the run home should
+      // be tense. The hunt progress itself is persisted immediately, so a
+      // sinking costs you the gold but never the chain.
+      this.addToHold(ship, reward, false);
       ship.economy.treasureHuntsCompleted += 1;
       ship.economy.treasureHunt = null;
-      this.events.push({ type: 'gold', amount: reward, for: ship.id });
-      this.events.push({ type: 'message', text: `Treasure found! +${reward} gold`, duration: 2500, for: ship.id });
+      this.events.push({ type: 'message', text: `Treasure found! +${reward} gold to hold`, duration: 2500, for: ship.id });
       this.persist(ship);
 
       if (ship.economy.treasureHuntsCompleted % BOSS_INTERVAL === 0) {
         this.spawnBossShip(ship.body.x, ship.body.z, ship.id, ship.economy.treasureHuntsCompleted / BOSS_INTERVAL);
       }
     }
-  }
-
-  private isNearHomePort(x: number, z: number): boolean {
-    const home = this.islands.find((isl) => isl.isHomePort);
-    if (!home) return false;
-    return Math.hypot(x - home.x, z - home.z) < home.radius + HOME_PORT_HEAT_RADIUS_EXTRA;
   }
 
   /** A tougher bot sent after a specific player once their heat runs high —
@@ -896,13 +1202,15 @@ export class GameRoom {
     this.events.push({ type: 'message', text: 'A hunter ship has picked up your trail!', duration: 3000, for: target.id });
   }
 
-  /** Heat rises on kills (see resolveCombat), decays over time — fast near
-   * home port, so making port is the natural way to "cool off" — and
-   * periodically has a chance to summon a hunter ship while it's high. */
+  /** Heat rises on kills — a flat HEAT_PER_PLAYER_KILL for sinking another
+   * captain, gold-scaled for bot kills and salvage recovery — and decays
+   * over time, fast inside the port sanctuary so making port is the natural
+   * way to cool off. While it's high it periodically summons a hunter ship
+   * AND makes every bot in range prefer you as a target (see updateBot). */
   private updateHeat(dt: number) {
     for (const ship of this.ships.values()) {
       if (ship.isBot || !ship.alive) continue;
-      const decay = this.isNearHomePort(ship.body.x, ship.body.z) ? HEAT_DECAY_PER_SEC_AT_PORT : HEAT_DECAY_PER_SEC;
+      const decay = this.isInSanctuary(ship.body.x, ship.body.z) ? HEAT_DECAY_PER_SEC_AT_PORT : HEAT_DECAY_PER_SEC;
       ship.heat = Math.max(0, ship.heat - decay * dt);
 
       ship.hunterCheckTimer += dt;
@@ -968,6 +1276,12 @@ export class GameRoom {
     const now = Date.now();
     for (const ship of this.ships.values()) {
       if (!ship.isBot && ship.disconnectedAt !== null && now - ship.disconnectedAt > RECONNECT_GRACE_MS) {
+        // A ghost ship is immune while it waits out the grace window, so a
+        // rage-quit can't be used to protect a fat hold — it just delays the
+        // spill by 60 seconds. Reconnect inside the window and the hold is
+        // still yours to sail home, which is what a real mobile connection
+        // drop deserves.
+        if (ship.alive) this.dropSalvage(ship);
         this.ships.delete(ship.id);
       }
     }
@@ -976,6 +1290,7 @@ export class GameRoom {
 
     for (const ship of [...this.ships.values()]) {
       if (ship.ramCooldown > 0) ship.ramCooldown = Math.max(0, ship.ramCooldown - dt);
+      if (!ship.isBot && ship.spawnProtection > 0) ship.spawnProtection = Math.max(0, ship.spawnProtection - dt);
       if (ship.alive) this.updateStatusEffects(ship, dt);
       if (!ship.alive) {
         ship.deathTimer += dt;
@@ -991,7 +1306,11 @@ export class GameRoom {
     this.resolveCombat();
     this.resolveRamming();
     this.updateCrates();
+    this.updateSalvage(dt);
     this.updateTreasureHunts();
     this.updateHeat(dt);
+    // Last, so anything earned this tick banks the same tick a player
+    // crosses into the sanctuary rather than one tick later.
+    this.updateBanking();
   }
 }

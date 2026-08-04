@@ -91,9 +91,11 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   total burn damage came out to exactly the expected value, not "close to."
   Client renders both effects: sail darkens while disabled, hull gets a
   pulsing orange smolder while burning. Bots always fire round shot — no AI
-  complexity added for ammo selection. PvP is still parked pending the
-  opt-in design answer, so all of this is player-vs-bot only for now, same
-  as ramming.
+  complexity added for ammo selection. **CORRECTION (open-PvP pass):** the
+  "player-vs-bot only" caveat here is obsolete — every ammo type now works
+  identically against other players. Chain shot in particular is much more
+  interesting in PvP than it ever was against bots: crippling a loaded
+  captain's sails so they can't reach port is now a real play.
 - [x] **Ramming (S):** driving your hull into a bot at speed (≥3.5 units/s
   relative closing speed) damages both sides, scaled by that closing speed
   (capped at 45) — reuses the same damage-number/hit-stop/shake feedback as
@@ -102,8 +104,12 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   glued together, with a 1.2s per-ship cooldown so one collision doesn't
   melt a target across several ticks. Ram kills pay out the same gold/heat/
   treasure-map rewards as a cannon kill (`killShip()` in `GameRoom.ts`,
-  factored out of `resolveCombat` so both paths share it). Player-vs-bot
-  only, matching the no-PvP design. Worth knowing: a bot that's already
+  factored out of `resolveCombat` so both paths share it). **CORRECTION
+  (open-PvP pass):** no longer player-vs-bot only — `resolveRamming` now
+  runs over every ordered ship pair with at least one player, so PvP ramming
+  works identically. It stays a trade-off rather than a dominant move for
+  exactly the reason it always did: it costs you the same damage you deal.
+  Worth knowing: a bot that's already
   spotted you holds its broadside-orbit range (~28 units), so landing a ram
   on an alert enemy means actively cutting inside its turn — it lands much
   more easily on a patrolling/unaware bot, which feels intentional (a
@@ -179,6 +185,15 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   actually being winnable most of the time instead of a coin-flip. No
   change to individual bot stats/rewards/AI, `ENEMY_SPAWN_INTERVAL`, or
   `MAX_ENEMIES` — purely a redistribution of which tier spawns where.
+  **CORRECTION (open-PvP pass):** this entry audited *which* tier spawns
+  *where* but accepted the world's scale and enemy count as given, and then
+  claimed the session pacing was fixed. It wasn't — the owner's playtest
+  called out both traversal time and emptiness. The 25% tier-0 intent is
+  preserved (and now derived from `worldRadius` rather than a magic `190`,
+  so it can't silently desync again), but `worldRadius`, `topSpeed` and the
+  enemy cap have all been rescaled. Treat the absolute numbers in this
+  entry (900-radius world, `BOT_TIER_STEP = 190`, dist ∈ [120, 870)) as
+  historical.
   Verified with a standalone `tsx` script driving a real `GameRoom`
   instance: cleared bots and called `(room as any).spawnBotWave()` 7500
   times with `Math.random` swept deterministically across `[0, 1)` (a
@@ -663,9 +678,13 @@ The server is authoritative (`server/`) and clients are thin renderers of
 its state (see `README.md` for how to run it). What's deliberately not in
 this first cut:
 
-- **PvP (M):** currently player cannonballs only damage bots, never other
-  players. Would need a toggle/flag (or a designated duel area) to opt in,
-  since griefing would otherwise ruin the co-op loop.
+- [x] **PvP (M):** ~~currently player cannonballs only damage bots, never
+  other players. Would need a toggle/flag (or a designated duel area) to opt
+  in, since griefing would otherwise ruin the co-op loop.~~ **Superseded.**
+  The owner made the call: full open PvP, no opt-in. Shipped — see the
+  "Open PvP + unbanked gold + world rescale" entry at the bottom of this
+  file for the anti-griefing design (which is economic, not a toggle) and
+  the exact verification values.
 - **Internet hosting (S/M):** works today over a LAN only (client derives the
   WebSocket URL from `window.location.hostname`). Hosting on a public VM
   needs a real domain/TLS (`wss://`) and probably a reverse proxy in front of
@@ -685,12 +704,200 @@ this first cut:
 
 ---
 
-**Suggested next session's focus:** a user pass flagged gameplay quality
-directly — combat impact/weight, repetitiveness, cheap visuals, and now
-onboarding are all addressed (hit feedback pass + ramming + lit water/sky +
-real hull/island geometry + first-run tutorial). Day-night cycle explicitly
-deferred per the user. Next, roughly in order: (1) PvP with an opt-in
-toggle once ready to defend the co-op loop from griefing, (2) mobile
-hosting/testing pass (tunnel for quick testing, or real `wss://` hosting
-for anything durable) — the touch controls exist but the newer UI has never
-been checked on a real mobile viewport.
+## Open PvP + unbanked gold + world rescale (answers PLAYTEST_FEEDBACK #1, #3, #6)
+
+The owner's verdict on the loop was *"overall game play is lame… is it just
+that you go around shooting others?"* The honest diagnosis was that the loop
+had **nothing at stake** — death cost you literally nothing, so no decision
+in the game was a real decision. Two product calls were made by the owner
+(full open PvP; unbanked gold dropped on death) and one structural error was
+corrected (world scale/density). All three are in.
+
+**The loop as it now stands:** leave port with an empty hold → earn gold at
+sea (crates, bots, treasure, other captains' spoils) into an *unbanked* hold
+→ every minute out, your hold gets fatter, your heat climbs, hunters start
+spawning, and every bot in range begins preferring you as a target → decide
+whether to keep hunting or run for port → reach the sanctuary and it all
+banks permanently, heat drains, and you spend at the shipyard. Get sunk
+first and 70% of the hold spills into the water for anyone to scoop.
+
+### 1. World scale and density (feedback #1, #3)
+
+Both were sized against explicit targets, not vibes.
+
+- **Traversal target: full map crossing in ~90s on a stock ship.**
+  `worldRadius` 900 → **400**, and `topSpeed` `6 + sailLevel*2.2` →
+  `9 + sailLevel*1.6`. Crossing: `2*400/9 = 88.9s` fresh (was `2*900/6 =
+  300s`), `2*400/21 = 38.1s` fully upgraded. A mid-band raid and back to
+  port is `2*250/9 = 55.6s`.
+  **The trade-off is deliberate and it is not a buff:** the floor moved, the
+  ceiling didn't. A fresh sloop is 50% faster; a maxed galleon is 6.7%
+  *slower* (22.5 → 21). Sail upgrades now buy a 2.33x speed spread instead
+  of 3.75x — still worth buying, no longer the tax a new player must pay
+  before the game stops feeling like a commute. Boost (14.4 u/s on a fresh
+  sloop) remains the escape valve that outruns even a tier-3 bot at 13.8,
+  which matters a great deal more now that fleeing protects real value.
+- **Encounter target: something worth reacting to roughly every 20s.** A bot
+  detects at 90 units, so a player at 9 u/s sweeps 1620 sq units/sec. Over
+  π·400² = 502,655 sq units, N bots give a mean gap of `502655/(1620·N)`:
+  N=6 in the old 2.54M world was **392s**; N=14 here is **22.2s**.
+  `MAX_ENEMIES = 6` is replaced by `10 + 4 per connected player, capped 22`
+  (solo = 14) so a busier server doesn't feel thinner per captain.
+  `ENEMY_SPAWN_INTERVAL` 8 → 5.
+  The more honest statistic than any mean, because the distribution is
+  bimodal: **the share of open water that already has an enemy in detect
+  range went from 5.8% to 50.8%** (Poisson, `1 - exp(-nπR²/A)`), measured at
+  51.0% over 400 live cold-start simulations. Density was deliberately not
+  pushed higher — the gaps between contacts are the windows in which running
+  a loaded hold home is possible at all, and closing them would remove the
+  decision the whole economy hangs on.
+- **Islands:** 12 → 18, and `generateIslands` rewritten. It used to place
+  them on evenly-spaced spokes at `150 + rand*(worldRadius-150)`, which is
+  uniform in *radius* and so heavily centre-biased in *area*, leaving the
+  inner disc bare. Now sqrt-distributed radius (uniform per unit area),
+  golden-angle spokes, and a rejection test enforcing 34 units of clear
+  water between any two shorelines. Density: 211,000 → **26,455 sq units
+  per island**, so land is almost always on the horizon and there is cover
+  to break line of sight in a PvP chase.
+- **Tier curve intent preserved, and made scale-proof.** `BOT_TIER_STEP`
+  was a magic `190` that would silently desync from any `worldRadius`
+  change. It's now derived: `(worldRadius - 120 - 30) / 4`, i.e. four equal
+  quarter-bands, so tiers 0–3 get **exactly 25% each at any world size**
+  (was 25.3/25.3/25.3/24.0). The 120-unit inner keep-out doubles as a
+  bot-free approach lane to port, which matters much more now that the last
+  leg home is carrying something losable.
+
+### 2. Unbanked gold — the thing that was actually missing (feedback #6)
+
+`PlayerShip.hold` (session-only, never persisted) vs `economy.gold`
+(banked, persisted, **the only currency the shipyard accepts** — that's what
+makes reaching port matter rather than being a formality). All at-sea income
+routes through one `addToHold()`, so nothing can accidentally pay into the
+safe pile. Entering the sanctuary banks instantly — no docking timer, since
+"sail into the ring" is a gesture a thumb can execute and "hold position for
+three seconds" is not.
+
+- **70% drops, 30% is destroyed.** A clean 100% drop is maximally tense but
+  merely *conserves* gold, so dying costs the world nothing and two players
+  can trade kills forever at no loss. The 30% burn means the ocean's
+  unbanked wealth decays on every sinking, which is the pressure that pushes
+  people to bank instead of endlessly re-contesting the same pile.
+- **The killer gets no automatic cut.** They have to stop, turn, and
+  physically scoop it, and the chunks are scattered on a ring wide enough
+  that no two can be collected in one pass — so a fat hold is genuinely more
+  turns to loot and the looter is parked and exposed for proportionally
+  longer. A kill becomes a contested scramble a third party can crash, not
+  a payout.
+- **Recovered salvage lands unbanked and heats you.** Winning a fight makes
+  you the next fat target rather than cashing you out. This is the property
+  that keeps it from being power creep: success raises your exposure.
+- **Anti-griefing is economic, not a rule.** Sinking a player pays *nothing*
+  directly — the reward is strictly their hold. So hunting a loaded captain
+  is lucrative and hunting a beginner or someone who just banked pays
+  literally zero while still costing 35 heat. Spawn-camping the poor is a
+  net loss with no special case needed to make it one.
+- Salvage lifetime 45s: long enough to fight over, short enough not to
+  litter the sea, and short enough to fit a mobile session's attention.
+  Treasure-hunt gold goes to the hold too (the run home from a dug-up chest
+  is the tensest moment in the game), but hunt *progress* is persisted
+  immediately, so a sinking costs the gold and never the chain.
+
+### 3. Full open PvP (feedback #6)
+
+`resolveCombat` no longer skips `ship.isBot === ball.ownerIsBot`; the filter
+is now a `canDamage()` that excludes only bot-on-bot fire and protected
+ships. `resolveRamming` runs over every ordered pair with at least one
+player. Both ammo effects and ram damage apply identically in PvP.
+
+- **Port sanctuary**, radius `home.radius + 45` = 67 units, in which no
+  damage flows **in either direction**. Symmetry is the point: a one-way
+  shield is a sniper nest you can camp. Sized against weapon range — a
+  cannonball flies ~36 units (26 u/s muzzle, ~1.4s flight), so the ring
+  can't be shot into from outside or out of from the island. Protection is
+  resolved at *impact*, not at launch, so ducking into port genuinely
+  disengages you. This is also now the fast-heat-decay ring (it used to be a
+  separate, smaller 37-unit circle) — "safe", "banked" and "cooling off" are
+  deliberately one place a player learns once.
+- **6s respawn immunity**, forfeited the instant you fire.
+- **Disconnected ghost ships are immune** for their 60s reconnect grace —
+  otherwise they're trivially farmable, and it would punish exactly the
+  mobile players most likely to drop a connection. Rage-quitting still
+  doesn't protect a hold: when the grace expires the ship's hold spills as
+  salvage anyway.
+- **Bots stay relevant and can't be used as cover.** Target selection is now
+  `dist / (1 + heat/100)` and skips protected players, so at max heat a bot
+  will chase you over a cold player up to 2x closer. Sinking a captain adds
+  a flat 35 heat (three kills tops out the meter), so preying on people
+  makes the whole world prey on you — the villain feedback loop the heat
+  system was built for but never really exercised.
+
+### Verification
+
+Standalone `tsx` script importing `GameRoom` directly, bypassing WebSocket
+transport entirely, **100 assertions, all on exact values**. Highlights:
+
+- `topSpeed` = exactly `9` at sailLevel 0 and exactly `21` at 7.5.
+- Tier boundaries driven through the real `spawnBotWave` with a scripted
+  `Math.random`: dist 120.0→tier 0, 182.4→0, 182.5→1, 245.0→2, 307.5→3,
+  369.9→3; 200k-sample shares `0.2509/0.2498/0.2501/0.2491`, tier 4 exactly 0.
+- `maxEnemies()` = exactly 10 / 14 / 22 / 22 at 0 / 1 / 3 / 4 players.
+- Predicted coverage 50.77% vs **measured 51.0%** over 400 live cold starts
+  (mean time-to-contact 15.8s, median 0.1s, p90 42.3s).
+- **A player cannonball for 20 damage takes another player from 60 to
+  exactly 40** — the assertion that would have read 60 before this pass.
+- Sanctuary boundary asserted to the tenth of a unit: protected at 66.9 from
+  port, **not** protected at 67.0. Target inside takes exactly 0; shooter
+  inside deals exactly 0 outward; spawn-protected takes exactly 0, then
+  **exactly 40** after firing clears it; ghost ship takes exactly 0.
+- A 250 hold drops `floor(250*0.7) = 175` as chunks `[59, 58, 58]` — summing
+  to exactly 175, not 174 (an even split would lose gold to rounding on
+  every single death). A 1000 hold caps at 5 chunks of exactly
+  `[140,140,140,140,140]`. Banked gold reads exactly 777 after the death
+  that spilled the hold.
+- Collecting all three chunks puts exactly 175 in the collector's hold and
+  exactly 0 in their bank; heat lands at exactly `35 + 175*0.15 = 61.25`.
+- 20,000-drop Monte Carlo on chunk scatter: tightest separation **11.281
+  units** > the 9-unit pickup diameter. This caught a real bug — the first
+  implementation scattered at `9 * [0.35, 1.0]` with 0.7 rad jitter and
+  produced chunks **4.24 units** apart, i.e. silently collectable two at a
+  time, which would have gutted the "looting is slow and exposed" trade-off.
+  My hand-derived bound had used `sin(40°)` where the geometry needed
+  `sin(15.95°)`; only the Monte Carlo caught it.
+- PvP ram: both ships take exactly 45 (`min(45, 18*2.6)`); exactly 0 inside
+  the sanctuary.
+- Bot targeting: equal heat → `attack` on the nearer player; hot player at
+  75 units beats a cold one at 40 → `chase`; a player in the sanctuary is
+  invisible → `patrol`. Bot-on-bot cannonball does exactly 0.
+- 300-world island sweep: exactly 19 islands every time (raised placement
+  retries 30 → 120 after measuring a ~1-in-300 world coming up short),
+  tightest shoreline gap 34.03 ≥ 34.
+- `npm run typecheck:server`, `npx tsc --noEmit`, `npm run build` all clean.
+
+### Not done here / handoffs
+
+- **Capturable ports** (feedback #5) explicitly out of scope, queued separately.
+- **Ammo legibility** (feedback #2) untouched — still `1,2,3,4` with no
+  explanation. Chain shot just became far more interesting in PvP, which
+  makes surfacing it more urgent, not less.
+- Salvage and the sanctuary ring are rendered with the **simplest possible
+  placeholder** geometry in `main.ts` (a coin cluster over an additive
+  slick; a flat additive ring). `art-director` owns making these read.
+- The hold readout is a bare `#hold-counter` div. `mobile-ux` owns the real
+  hierarchy — the "you are carrying 800 unbanked gold and there is a ship on
+  your tail" state should be the loudest thing on the screen, and salvage
+  should be on the minimap.
+- `banked` is a new `GameEvent`. `sound-design` owns the cue — banking is
+  the payoff moment of an entire run and currently makes no noise.
+
+---
+
+**Suggested next session's focus:** the loop now has stakes, but three
+things are still missing before it's *addictive* rather than merely tense.
+(1) **Ammo legibility** (feedback #2) — four tuned trade-offs the player
+can't see. (2) **Capturable ports** (feedback #5) — the owner's own idea,
+and the one mechanic that would give the 18 islands a purpose, shorten the
+bank run, and create territory worth defending. (3) **A reason to return
+tomorrow** — there is still no session goal, no leaderboard, no daily
+anything; banked gold accumulates but nothing recognises it. Also still
+open: mobile hosting/testing on a real device, and graphics, which the owner
+has now rejected three times.

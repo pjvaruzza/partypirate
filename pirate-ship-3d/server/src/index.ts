@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { GameRoom } from './GameRoom';
 import { flushSync, loadPlayer } from './persistence';
-import type { ClientMessage, ServerMessage, ShipSnapshot, CannonballSnapshot, CrateInfo } from '../../src/shared/protocol';
+import type {
+  ClientMessage,
+  ServerMessage,
+  ShipSnapshot,
+  CannonballSnapshot,
+  CrateInfo,
+  SalvageInfo,
+} from '../../src/shared/protocol';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const TICK_MS = 50;
@@ -94,6 +101,7 @@ function broadcast() {
     alive: s.alive,
     sailDisabled: s.sailDisableTimer > 0,
     burning: s.burnTicksRemaining > 0,
+    protectedFromDamage: room.isShipProtected(s),
   }));
   const cannonballsSnapshot: CannonballSnapshot[] = room.cannonballs.map((b) => ({
     id: b.id,
@@ -105,11 +113,25 @@ function broadcast() {
   const cratesSnapshot: CrateInfo[] = room.crates
     .filter((c) => !c.collected)
     .map((c) => ({ id: c.id, x: c.x, z: c.z, value: c.value }));
+  const salvageSnapshot: SalvageInfo[] = room.salvage.map((p) => ({
+    id: p.id,
+    x: p.x,
+    z: p.z,
+    value: p.value,
+    ownerName: p.ownerName,
+  }));
 
   for (const ship of room.ships.values()) {
     if (ship.isBot || ship.disconnectedAt !== null) continue;
     const you = room.buildEconomySnapshot(ship);
-    send(ship.socket, { type: 'state', ships: shipsSnapshot, cannonballs: cannonballsSnapshot, crates: cratesSnapshot, you });
+    send(ship.socket, {
+      type: 'state',
+      ships: shipsSnapshot,
+      cannonballs: cannonballsSnapshot,
+      crates: cratesSnapshot,
+      salvage: salvageSnapshot,
+      you,
+    });
 
     const personalEvents = room.events.filter((e) => !('for' in e) || e.for === undefined || e.for === ship.id);
     if (personalEvents.length > 0) send(ship.socket, { type: 'events', events: personalEvents });

@@ -87,6 +87,19 @@ export interface CrateInfo {
   value: number;
 }
 
+/** Unbanked gold spilled by a sunk ship — floats for a fixed lifetime and can
+ * be collected by ANY player, including the one who sank it. The killer gets
+ * no automatic cut: they have to physically stop and scoop it up, which is
+ * the trade-off that makes a kill a contested moment rather than a payout. */
+export interface SalvageInfo {
+  id: string;
+  x: number;
+  z: number;
+  value: number;
+  /** Whose hold this fell out of — flavour for "Captain X's spoils". */
+  ownerName: string;
+}
+
 export interface ShipSnapshot {
   id: string;
   name: string;
@@ -110,6 +123,11 @@ export interface ShipSnapshot {
   sailDisabled: boolean;
   /** Hull alight from fire shot — ticking damage until this clears. */
   burning: boolean;
+  /** Can neither deal nor take damage right now: inside the home-port
+   * sanctuary, under post-respawn immunity, or a disconnected ghost ship.
+   * Always false for bots. Worth rendering — otherwise players waste
+   * broadsides on targets that can't be hurt. */
+  protectedFromDamage: boolean;
 }
 
 export interface CannonballSnapshot {
@@ -121,7 +139,23 @@ export interface CannonballSnapshot {
 }
 
 export interface EconomySnapshot {
+  /** BANKED gold: safe forever, persisted, and the only currency the
+   * shipyard accepts. Everything earned at sea lands in `hold` first. */
   gold: number;
+  /** Unbanked gold "in the hold" — earned at sea, banked automatically the
+   * moment you enter the home-port sanctuary, and spilled as salvage if you
+   * sink first. Not persisted: it exists only while you're afloat. */
+  hold: number;
+  /** How much of `hold` would actually spill as collectable salvage if you
+   * sank right now (the rest is destroyed). Precomputed server-side so the
+   * HUD never has to duplicate the drop fraction. */
+  holdAtRisk: number;
+  /** Inside the home-port sanctuary: hold banks automatically and no damage
+   * can be dealt or taken, by anyone, in either direction. */
+  inSanctuary: boolean;
+  /** Seconds of post-respawn immunity left. Ends immediately if you fire, so
+   * it can't be used as a shield to shoot from. */
+  spawnProtection: number;
   sails: number;
   cannons: number;
   hull: number;
@@ -139,9 +173,10 @@ export interface EconomySnapshot {
   /** The dig site for this player's active treasure map, if any — only ever
    * sent to the player who owns it. */
   treasureHunt: { x: number; z: number } | null;
-  /** 0-100 "wanted level" — rises on kills, decays over time (fast near
-   * home port), and periodically summons a hunter ship when high. Session
-   * state, not persisted across reconnects/logouts. */
+  /** 0-100 "wanted level" — rises on kills (much faster on PLAYER kills),
+   * decays over time (fast near home port), periodically summons a hunter
+   * ship when high, and makes bots preferentially target you. Session state,
+   * not persisted across reconnects/logouts. */
   heat: number;
 }
 
@@ -157,6 +192,7 @@ export interface StateMessage {
   ships: ShipSnapshot[];
   cannonballs: CannonballSnapshot[];
   crates: CrateInfo[];
+  salvage: SalvageInfo[];
   you: EconomySnapshot;
 }
 
@@ -169,6 +205,7 @@ export type GameEvent =
   | { type: 'sunk'; shipId: string; x: number; z: number }
   | { type: 'ram'; x: number; y: number; z: number }
   | { type: 'gold'; amount: number; for: string }
+  | { type: 'banked'; amount: number; for: string }
   | { type: 'message'; text: string; duration?: number; for?: string }
   | { type: 'chat'; name: string; text: string };
 

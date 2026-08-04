@@ -45,8 +45,19 @@ of respawning you fresh at port.
 Press **Enter** anywhere in-game to open a chat box, Enter again to send,
 Escape to cancel — messages are visible to everyone in the world.
 
-Bots are hostile to all players; players can't damage each other (no PvP
-yet — see `ROADMAP.md`).
+**PvP is fully open.** Bots are hostile to everyone, and players can damage
+each other anywhere outside the home-port sanctuary — a ring of radius
+`island radius + 45` around home port in which no damage flows in either
+direction, and in which your hold banks automatically. Freshly respawned
+ships get 6 seconds of immunity (forfeited the moment you fire), and a ship
+whose socket has dropped is immune for its 60-second reconnect window.
+
+Gold earned at sea is **unbanked** — it sits in your hold until you reach
+port. Sink and 70% of it spills as floating salvage that any ship can
+collect (the other 30% is destroyed); banked gold is never at risk and is
+the only currency the shipyard accepts. Sinking another captain pays you
+nothing directly — the reward is their spilled hold, which you have to stop
+and physically scoop up.
 
 ## Production build (client only)
 

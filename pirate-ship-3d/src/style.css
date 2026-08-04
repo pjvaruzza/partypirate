@@ -138,6 +138,47 @@ body {
   flex: 0 0 auto;
 }
 
+/* Unbanked hold gold. Sits directly under the banked counter so the two
+   numbers read as a pair: the safe one and the one you can lose. Placeholder
+   treatment — mobile-ux owns the real hierarchy/urgency design. */
+#hold-counter {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ffd76a;
+  background: linear-gradient(160deg, #2c1c06, #17100a);
+  padding: 3px 10px;
+  border-radius: 4px;
+  width: fit-content;
+  box-shadow:
+    0 0 0 1px rgba(255, 190, 90, 0.45),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08);
+}
+
+#hold-counter #hold-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  opacity: 0.75;
+}
+
+#hold-counter #hold-risk {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ff9a6a;
+  opacity: 0.9;
+}
+
+#hold-counter.banked {
+  color: #b8ffcf;
+  box-shadow:
+    0 0 0 1px rgba(120, 255, 180, 0.7),
+    inset 0 1px 1px rgba(255, 255, 255, 0.12);
+}
+
 #hud-top-right {
   position: absolute;
   top: 16px;

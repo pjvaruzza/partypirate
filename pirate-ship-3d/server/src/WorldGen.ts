@@ -12,13 +12,41 @@ export interface CrateState {
   collected: boolean;
 }
 
+/** Minimum clear water between two island shorelines, and between any island
+ * and the home-port sanctuary — enough for a galleon to work through without
+ * scraping, so denser islands add navigation texture rather than roadblocks. */
+const ISLAND_CLEARANCE = 34;
+const HOME_PORT_KEEP_OUT = 90;
+
+/** Islands used to sit on `islandCount` evenly-spaced angular spokes at
+ * `150 + rand*(worldRadius-150)`, which is uniform in *radius* and therefore
+ * heavily biased toward the centre in *area* — and left the whole inner disc
+ * bare. Radius is now sqrt-distributed so islands are spread uniformly over
+ * the water's actual area, with golden-angle spokes and a rejection test so
+ * they don't pile up or overlap. */
 export function generateIslands(islandCount: number, worldRadius: number): IslandInfo[] {
   const islands: IslandInfo[] = [{ x: 0, z: 0, radius: 22, isHomePort: true }];
+  const inner = HOME_PORT_KEEP_OUT;
+  const outer = Math.max(inner + 1, worldRadius - 25);
+  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
   for (let i = 0; i < islandCount; i++) {
-    const angle = (i / islandCount) * Math.PI * 2 + Math.random() * 0.5;
-    const dist = 150 + Math.random() * (worldRadius - 150);
     const radius = 12 + Math.random() * 20;
-    islands.push({ x: Math.cos(angle) * dist, z: Math.sin(angle) * dist, radius, isHomePort: false });
+    let placed = false;
+    // 120 attempts, not 30: at 30 a ~1-in-300 world came up an island short
+    // (measured), which would silently thin the map for whoever hit it.
+    for (let attempt = 0; attempt < 120 && !placed; attempt++) {
+      const angle = i * GOLDEN_ANGLE + (Math.random() - 0.5) * 0.9;
+      // sqrt lerp between inner² and outer² == uniform density per unit area.
+      const t = Math.random();
+      const dist = Math.sqrt(inner * inner + t * (outer * outer - inner * inner));
+      const x = Math.cos(angle) * dist;
+      const z = Math.sin(angle) * dist;
+      if (dist < HOME_PORT_KEEP_OUT + radius) continue;
+      if (islands.some((isl) => Math.hypot(isl.x - x, isl.z - z) < isl.radius + radius + ISLAND_CLEARANCE)) continue;
+      islands.push({ x, z, radius, isHomePort: false });
+      placed = true;
+    }
   }
   return islands;
 }

@@ -30,6 +30,14 @@
             </svg>
             <span id="gold-amount">0</span>
           </div>
+          <!-- Unbanked gold "in the hold": earned at sea, lost if you sink,
+               banked automatically when you reach port. Placeholder styling —
+               mobile-ux owns making the at-risk state read urgently enough. -->
+          <div id="hold-counter" class="hidden">
+            <span id="hold-label">HOLD</span>
+            <span id="hold-amount">0</span>
+            <span id="hold-risk"></span>
+          </div>
         </div>
         <div id="hud-top-right">
           <div id="ship-name">Sea Sprite</div>
@@ -152,12 +160,18 @@
             <li>
               <strong>Fight:</strong>
               <span class="desktop-hint">Space</span><span class="touch-hint">FIRE</span>
-              to broadside — pull up alongside an enemy so your port/starboard cannons bear. Ramming a bot at
-              speed damages you both, too.
+              to broadside — pull up alongside an enemy so your port/starboard cannons bear. Ramming at
+              speed damages you both, too. <strong>Other captains are fair game anywhere outside port.</strong>
             </li>
+            <li>
+              <strong>Your hold:</strong> gold you earn at sea is <em>unbanked</em> — sink and most of it
+              spills into the water for anyone to scoop up. Sail into home port to bank it permanently.
+              Banked gold is safe forever, and it's the only gold the shipyard takes.
+            </li>
+            <li><strong>Port is a sanctuary:</strong> nobody can be hurt inside the ring around home port, in either direction. Sail into it to bank, repair your nerve, and cool off.</li>
             <li><strong>Shipyard:</strong> sail back to home port (the gold marker on your minimap) to upgrade your ship and place cannons.</li>
-            <li><strong>Treasure:</strong> sinking enemies sometimes drops a torn map — follow the glowing beacon to dig it up.</li>
-            <li><strong>Heat:</strong> sinking ships raises your wanted meter. Let it cool at port before it draws a hunter your way.</li>
+            <li><strong>Treasure:</strong> sinking enemies sometimes drops a torn map — follow the glowing beacon to dig it up. It goes straight in your hold, so get it home.</li>
+            <li><strong>Heat:</strong> sinking ships raises your wanted meter — sinking <em>captains</em> raises it far faster. High heat draws hunters and makes every bot around prefer you. Let it cool at port.</li>
             <li><strong>Chat:</strong> press Enter or tap the chat icon to talk to other captains.</li>
           </ul>
           <button id="tutorial-close" class="btn-primary">Set Sail</button>

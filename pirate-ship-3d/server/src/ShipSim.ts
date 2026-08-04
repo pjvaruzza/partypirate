@@ -15,8 +15,17 @@ export interface ShipBody {
   speed: number;
 }
 
+/** Was `6 + sailLevel * 2.2`. The floor was the problem, not the ceiling: a
+ * fresh sloop at 6 units/sec needed ~5 minutes to cross the old 900-radius
+ * world, i.e. one traversal consumed an entire 5-15 minute mobile session,
+ * while a fully-upgraded galleon (effective sailLevel 7.5) sat at 22.5.
+ * Raising the base to 9 and flattening the per-level step to 1.6 makes the
+ * starting ship 50% faster while leaving the top end essentially unchanged
+ * (21 vs. 22.5, -6.7%). The trade-off is deliberate: sail upgrades buy a
+ * 2.33x speed spread instead of 3.75x, so they're worth buying but no longer
+ * a tax a new player must pay before the game stops feeling like a commute. */
 export function topSpeed(stats: ShipStats): number {
-  return 6 + stats.sailLevel * 2.2;
+  return 9 + stats.sailLevel * 1.6;
 }
 
 export function acceleration(stats: ShipStats): number {

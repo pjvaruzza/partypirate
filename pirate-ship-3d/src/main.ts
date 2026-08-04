@@ -14,7 +14,14 @@ import { Chat } from './ui/Chat';
 import { Tutorial } from './ui/Tutorial';
 import { Minimap } from './ui/Minimap';
 import { Network } from './net/Network';
-import { SHIP_CLASS_SCALE, type CannonballSnapshot, type CrateInfo, type GameEvent, type ShipSnapshot } from './shared/protocol';
+import {
+  SHIP_CLASS_SCALE,
+  type CannonballSnapshot,
+  type CrateInfo,
+  type GameEvent,
+  type SalvageInfo,
+  type ShipSnapshot,
+} from './shared/protocol';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const portBtn = document.getElementById('port-btn') as HTMLButtonElement;
@@ -227,6 +234,97 @@ function sameLoadout(a: ShipSnapshot['loadout'], b: ShipSnapshot['loadout']): bo
   return a.front === b.front && a.left === b.left && a.right === b.right;
 }
 
+/** Placeholder visual for spilled hold gold — a glinting coin cluster over a
+ * flat slick. Deliberately the simplest thing that reads as "loot in the
+ * water" and is findable at a glance; a proper floating-debris/coin-shimmer
+ * treatment is an art-director job, as is showing it on the minimap. */
+const SALVAGE_GEO = new THREE.IcosahedronGeometry(0.55, 0);
+const SALVAGE_MAT = new THREE.MeshStandardMaterial({
+  color: 0xffcc44,
+  emissive: 0xffa000,
+  emissiveIntensity: 0.85,
+  roughness: 0.3,
+  metalness: 0.9,
+});
+const SALVAGE_SLICK_GEO = new THREE.CircleGeometry(2.2, 20);
+const SALVAGE_SLICK_MAT = new THREE.MeshBasicMaterial({
+  color: 0xffd76a,
+  transparent: true,
+  opacity: 0.28,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+
+function buildSalvageMesh(): THREE.Group {
+  const group = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const coin = new THREE.Mesh(SALVAGE_GEO, SALVAGE_MAT);
+    const a = (i / 3) * Math.PI * 2;
+    coin.position.set(Math.cos(a) * 0.7, 0.35 + i * 0.12, Math.sin(a) * 0.7);
+    group.add(coin);
+  }
+  const slick = new THREE.Mesh(SALVAGE_SLICK_GEO, SALVAGE_SLICK_MAT);
+  slick.rotation.x = -Math.PI / 2;
+  slick.position.y = 0.06;
+  group.add(slick);
+  return group;
+}
+
+const renderedSalvage = new Map<string, THREE.Group>();
+
+function syncSalvage(piles: SalvageInfo[]) {
+  const seen = new Set<string>();
+  for (const pile of piles) {
+    seen.add(pile.id);
+    if (renderedSalvage.has(pile.id)) continue;
+    const group = buildSalvageMesh();
+    group.position.set(pile.x, 0, pile.z);
+    scene.add(group);
+    renderedSalvage.set(pile.id, group);
+  }
+  for (const [id, group] of renderedSalvage) {
+    if (seen.has(id)) continue;
+    scene.remove(group);
+    renderedSalvage.delete(id);
+  }
+}
+
+/** Flat ring under any ship that currently can't deal or take damage (in the
+ * port sanctuary, freshly respawned, or a disconnected ghost). Without it a
+ * player just watches their broadsides pass harmlessly through someone with
+ * no explanation. Placeholder — art-director owns making this read as a
+ * harbour ward rather than a debug circle. */
+const PROTECT_RING_GEO = new THREE.RingGeometry(2.4, 3.0, 28);
+const PROTECT_RING_MAT = new THREE.MeshBasicMaterial({
+  color: 0x8fd8ff,
+  transparent: true,
+  opacity: 0.4,
+  side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+const renderedProtectRings = new Map<string, THREE.Mesh>();
+
+function syncProtectionRing(id: string, ship: ShipSnapshot, y: number) {
+  const want = ship.protectedFromDamage && ship.alive;
+  const existing = renderedProtectRings.get(id);
+  if (!want) {
+    if (existing) {
+      scene.remove(existing);
+      renderedProtectRings.delete(id);
+    }
+    return;
+  }
+  let ring = existing;
+  if (!ring) {
+    ring = new THREE.Mesh(PROTECT_RING_GEO, PROTECT_RING_MAT);
+    ring.rotation.x = -Math.PI / 2;
+    scene.add(ring);
+    renderedProtectRings.set(id, ring);
+  }
+  ring.position.set(ship.x, y + 0.15, ship.z);
+}
+
 function syncCrates(crates: CrateInfo[]) {
   const seen = new Set<string>();
   for (const crate of crates) {
@@ -250,6 +348,10 @@ function clearWorldState() {
   renderedShipClass.clear();
   for (const mesh of renderedCrates.values()) scene.remove(mesh);
   renderedCrates.clear();
+  for (const group of renderedSalvage.values()) scene.remove(group);
+  renderedSalvage.clear();
+  for (const ring of renderedProtectRings.values()) scene.remove(ring);
+  renderedProtectRings.clear();
   for (const vis of renderedCannonballs.values()) scene.remove(vis.group);
   renderedCannonballs.clear();
   treasureMarker.setTarget(null);
@@ -293,6 +395,7 @@ network.onDisconnect = () => {
 network.onState = (state) => {
   hud.updateEconomy(state.you);
   syncCrates(state.crates);
+  syncSalvage(state.salvage);
   treasureMarker.setTarget(state.you.treasureHunt);
 };
 network.onEvents = (events) => handleEvents(events);
@@ -392,6 +495,12 @@ function handleEvents(events: GameEvent[]) {
       // drops (e.g. this was the local player's own death).
       if (ev.shipId === network.yourId) sound.setBurning(false);
       triggerHitstop(0.09);
+    } else if (ev.type === 'banked') {
+      // Distinct from a 'gold' pickup: this is the moment the hold becomes
+      // permanent. Needs its own sound cue (flagged to sound-design) and a
+      // proper HUD transition (flagged to mobile-ux) — the message banner is
+      // the placeholder.
+      hud.flashBanked();
     } else if (ev.type === 'message') {
       hud.showMessage(ev.text, ev.duration);
     } else if (ev.type === 'chat') {
@@ -427,6 +536,11 @@ function animate() {
     const h = ocean.getHeightAt(mesh.position.x, mesh.position.z, elapsed);
     mesh.position.y = h + 0.3;
     mesh.rotation.y = elapsed * 0.6;
+  }
+  for (const group of renderedSalvage.values()) {
+    const h = ocean.getHeightAt(group.position.x, group.position.z, elapsed);
+    group.position.y = h;
+    group.rotation.y = elapsed * 1.1;
   }
   const treasureH = ocean.getHeightAt(treasureMarker.group.position.x, treasureMarker.group.position.z, elapsed);
   treasureMarker.update(dt, elapsed, treasureH);
@@ -486,6 +600,7 @@ function animate() {
       ship.updateHitFlash(dt, elapsed);
       const h = ocean.getHeightAt(cur.x, cur.z, elapsed);
       ship.syncVisual(h, elapsed, waveAt);
+      syncProtectionRing(cur.id, cur, h);
 
       if (isYou) {
         mine = cur;
@@ -498,6 +613,11 @@ function animate() {
       scene.remove(ship.group);
       renderedShips.delete(id);
       renderedShipClass.delete(id);
+      const ring = renderedProtectRings.get(id);
+      if (ring) {
+        scene.remove(ring);
+        renderedProtectRings.delete(id);
+      }
     }
 
     if (mine) {

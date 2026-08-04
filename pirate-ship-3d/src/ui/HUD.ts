@@ -23,6 +23,10 @@ export class HUD {
   private heatBar = document.getElementById('heat-bar') as HTMLDivElement;
   private heatFill = document.getElementById('heat-fill') as HTMLDivElement;
   private goldAmount = document.getElementById('gold-amount') as HTMLSpanElement;
+  private holdCounter = document.getElementById('hold-counter') as HTMLDivElement | null;
+  private holdAmount = document.getElementById('hold-amount') as HTMLSpanElement | null;
+  private holdRisk = document.getElementById('hold-risk') as HTMLSpanElement | null;
+  private bankedFlashTimeout: number | undefined;
   private banner = document.getElementById('message-banner') as HTMLDivElement;
   private shipyard = document.getElementById('shipyard') as HTMLDivElement;
   private shipyardClose = document.getElementById('shipyard-close') as HTMLButtonElement;
@@ -76,6 +80,29 @@ export class HUD {
     this.goldAmount.textContent = String(Math.floor(amount));
   }
 
+  /** Unbanked gold and how much of it would actually spill if sunk right
+   * now. Hidden entirely when the hold is empty so it isn't permanent HUD
+   * furniture — it should appear as a consequence of going out to sea. */
+  setHold(hold: number, atRisk: number, inSanctuary: boolean) {
+    if (!this.holdCounter || !this.holdAmount || !this.holdRisk) return;
+    this.holdCounter.classList.toggle('hidden', hold <= 0);
+    this.holdAmount.textContent = String(Math.floor(hold));
+    this.holdRisk.textContent = inSanctuary ? 'banking…' : atRisk > 0 ? `−${atRisk} if sunk` : '';
+  }
+
+  /** Briefly tints the hold readout on a successful bank. Placeholder for the
+   * real "gold slides into the vault" moment — mobile-ux/sound-design. */
+  flashBanked() {
+    if (!this.holdCounter) return;
+    this.holdCounter.classList.remove('hidden');
+    this.holdCounter.classList.add('banked');
+    window.clearTimeout(this.bankedFlashTimeout);
+    this.bankedFlashTimeout = window.setTimeout(() => {
+      this.holdCounter?.classList.remove('banked');
+      if (Number(this.holdAmount?.textContent ?? '0') <= 0) this.holdCounter?.classList.add('hidden');
+    }, 900);
+  }
+
   setHeat(heat: number) {
     this.heatBar.classList.toggle('hidden', heat <= 0);
     this.heatFill.style.width = `${Math.max(0, Math.min(100, heat))}%`;
@@ -114,6 +141,7 @@ export class HUD {
   updateEconomy(economy: EconomySnapshot) {
     this.latestEconomy = economy;
     this.setGold(economy.gold);
+    this.setHold(economy.hold, economy.holdAtRisk, economy.inSanctuary);
     this.setHeat(economy.heat);
     if (this.isShipyardOpen()) this.renderShipyard(economy);
   }
