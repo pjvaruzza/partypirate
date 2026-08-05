@@ -1076,3 +1076,129 @@ silhouettes and dressing. What is still holding the look back, in order:
    from `main.ts` (flagged by the previous session and still true); at close
    range they blow out to white ellipses on the water and now clash with the
    new wake foam.
+
+---
+
+## Mobile UX pass — ammo legibility, hold urgency, salvage on the radar
+
+### The complaint this answers
+
+> "the different types of ammo are unclear. just 1,2,3,4 doesnt say anything
+> about whats the difference, if there are advantages, etc. if there isnt,
+> just cut the option"
+
+**Root cause, confirmed by measurement, not inference:** the four ammo
+descriptions *did* exist — as `title=` attributes on the `.ammo-btn`
+elements. `title` renders as a **hover tooltip**, and touch devices have no
+hover. On the priority platform the entire ammo mechanic was undocumented,
+so the owner's "1,2,3,4 doesn't say anything" was literally accurate rather
+than a matter of taste. Cutting the ammo types was on the table; it was not
+needed, because the information had never actually been shipped.
+
+### What changed
+
+- [x] **The ammo rack (`#bottom-bar`).** Four unlabelled 44px circles became
+  a full-width bottom rack, one cell per shot (87×54 at 375px), each with a
+  permanent name **and** a three-word effect tag (`Chain / stops runners`),
+  plus a strip above it that always spells out the exact trade for the
+  loaded shot (`Half damage, slow reload — but cuts their top speed by 65%
+  for 3.5s.`). Copy is derived from the `CHAIN_*` / `GRAPE_*` / `FIRE_*`
+  constants in `GameRoom.ts` and lives in `src/ui/AmmoRack.ts` next to a
+  comment naming them, so the two can be kept honest. No hover, no
+  long-press, no manual — everything is on screen at all times.
+- [x] **Ammo in the tutorial**, placed third (right after Steer and Fight),
+  fully above the fold at 375×667, with an icon per shot and the trade in
+  plain words. It previously did not mention ammo at all.
+- [x] **One-time coach mark** above the controls the first time the HUD
+  appears, pointing at the rack (glow, not an arrow) — deliberately *not* a
+  bubble over the rack, since a one-shot panel that swallows the first tap
+  on FIRE would be worse than the problem it solves.
+
+### Defects found and fixed along the way (all measured at 375×667)
+
+- **The tutorial was un-dismissable on an iPhone 8/SE.** The panel rendered
+  849px tall in a 667px viewport; "Set Sail" sat at y=684..728, below the
+  fold, and `elementFromPoint` at its centre returned `null`. A first-time
+  player on the target device could not get past the tutorial. Now capped +
+  inner-scrolled like `#shipyard-panel`, with a fade cue while content
+  remains below.
+- **The old ammo strip was stealing touches from the two most-used
+  controls.** It spanned x 88..288 at y 599..643 with `z-index: 5`, over the
+  joystick's lower-right quadrant (x 24..154) and the fire button's left
+  edge (x 275). Every bottom-anchored control now offsets from a single
+  `--bottom-bar-h` custom property instead of four hand-tuned magic numbers.
+- **`#hold-counter.hidden` had no CSS rule.** There was no global `.hidden`
+  declaration, so an empty hold rendered a permanent "HOLD 0". Added.
+- **At 320px the hold block ran under the minimap and the icon row**
+  (hold 16..192 vs minimap 154..304). Fixed with a `max-width: 360px` query
+  that gives width back rather than shrinking any touch target.
+- `viewport-fit=cover` added — without it every `env(safe-area-inset-*)` in
+  the stylesheet silently resolved to 0.
+
+### Hold counter — making the stake felt
+
+- [x] Four escalation tiers by unbanked value (150 / 400 / 800), walking
+  brass → amber → ember → blood, with the numeral growing 28→34px and the
+  top two tiers breathing. Nothing else in the HUD pulses, so the pulse
+  means exactly one thing.
+- [x] A fill meter (saturating at 1000) for "how deep am I in?" with no
+  reading required, and an explicit `−N spills if you sink` line driven by
+  the server's `holdAtRisk`.
+- [x] `inSanctuary` flips the whole block from hot to sea-green with the
+  pulse off — visible in peripheral vision without reading a word, which is
+  the point when you have just been chased home.
+- [x] **The banked moment now exists.** A 1.7s centred `+840 / banked —
+  yours for good` burst with its own scrim, replacing a 900ms tint on a
+  14px div. Positioned at 46% so it clears the minimap's lower edge.
+- [x] `spawnProtection` surfaced as a transient `Immune Ns` chip.
+- [x] Health bar trimmed 200×16 → 168×13 and banked gold 18→16px, so the
+  hold is genuinely the loudest thing in the top-left stack rather than
+  merely present.
+
+### Salvage on the minimap
+
+- [x] `Minimap.render` now takes crates and salvage. Crates draw as small
+  desaturated tan squares (deliberately the dullest marker — there are a lot
+  of them); salvage draws as the radar's only animated marker, a bright gold
+  coin with an expanding pulse ring sized by value, plus an edge marker for
+  the nearest pile beyond the 240-unit radar range. Verified by pixel audit:
+  170 salvage-coloured pixels with piles present, 4 without.
+
+### Verification
+
+Playwright at `iPhone 8` (375×667), `iPhone 13` (390×664), iPhone 8
+landscape (667×375), a synthetic 320×568, and desktop 1280×800 — real join
+flow, real `tap()`, `getBoundingClientRect` and `elementFromPoint`, not just
+screenshots. Every interactive control grid-swept at 25 points for occlusion
+by another control (all `clear`); every visible button audited against the
+44×44 minimum (none under); `.ammo-btn` labels checked against `scrollWidth`
+because the cell is `overflow: hidden` and a clipped label would otherwise
+be invisible to a viewport-overflow check. Hold tiers, the sanctuary flip,
+the banked burst and the salvage markers were all driven through the real
+network path (state/event frames rewritten in flight), not by poking the
+DOM. First-run, second-run, shipyard open/close from the relocated port
+button, and the desktop 1-4 keybinds all exercised end to end.
+`npx tsc --noEmit` and `npm run build` clean; `grep -c
+"__pg\|__probe\|__debug"` is 0 across `src/main.ts` and `src/ui/*.ts`.
+
+### Honest assessment / handoffs
+
+A new player will now understand the ammo choice — the names, the tags and
+the always-on detail line answer "what's the difference and is there an
+advantage" without a tap. Two things still work against it, neither in this
+pass's scope:
+
+1. **No feedback that the effect landed.** Chain's rigging foul and fire's
+   burn render on the *target* ship, but nothing on your own screen confirms
+   "rigging fouled" the way a damage number confirms a hit. The rack now
+   promises an effect the game never explicitly acknowledges. `fire`/`hit`
+   `GameEvent`s still carry no `ammoType` (already flagged earlier in this
+   file), which is what a hit-confirm would need — **gameplay-designer**.
+2. **Grape and fire are situational; chain is not.** With PvP and unbanked
+   gold live, chain-shotting a loaded captain is close to strictly correct
+   whenever a player is the target, and the UI now makes that obvious. That
+   is a tuning question the clearer UI has surfaced rather than created —
+   worth a look before it becomes the only shot anyone loads.
+3. The bottom rack costs ~99px of a 667px screen. That is a deliberate
+   trade (the mechanic was invisible; now it is not), but if the HUD gains
+   anything else at the bottom, this is the budget it comes out of.

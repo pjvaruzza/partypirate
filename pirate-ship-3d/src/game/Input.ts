@@ -1,9 +1,15 @@
 import { AMMO_TYPE_ORDER, type AmmoType, type InputState } from '../shared/protocol';
+import { AmmoRack } from '../ui/AmmoRack';
 
 export type { InputState };
 
 export class InputManager {
   readonly state: InputState = { turn: 0, throttle: 0, fire: false, boost: false, ammoType: 'round' };
+
+  /** The rack's presentation (labels, detail strip, coach mark). Exposed so
+   * main.ts can trigger the first-run coach once the tutorial is out of the
+   * way. */
+  readonly ammoRack = new AmmoRack();
 
   private keys = new Set<string>();
   private joystickActive = false;
@@ -31,16 +37,14 @@ export class InputManager {
   setAmmoType(ammoType: AmmoType) {
     if (this.state.ammoType === ammoType) return;
     this.state.ammoType = ammoType;
-    for (const el of document.querySelectorAll('.ammo-btn')) {
-      el.classList.toggle('active', el.getAttribute('data-ammo') === ammoType);
-    }
+    this.ammoRack.setActive(ammoType);
   }
 
   private setupAmmoSelector() {
-    for (const ammoType of AMMO_TYPE_ORDER) {
-      const btn = document.querySelector(`.ammo-btn[data-ammo="${ammoType}"]`);
-      btn?.addEventListener('click', () => this.setAmmoType(ammoType));
-    }
+    this.ammoRack.onSelect = (ammoType) => this.setAmmoType(ammoType);
+    // Seeds the detail strip from the starting ammo rather than trusting the
+    // markup's default copy to stay in sync with AMMO_DETAIL.
+    this.ammoRack.setActive(this.state.ammoType ?? 'round');
   }
 
   private setupButton(id: string, field: 'fire' | 'boost') {

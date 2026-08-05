@@ -15,6 +15,16 @@ const COIN_ICON =
   '<path d="M12 5.5v13M5.5 12h13M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" stroke="rgba(0,0,0,0.35)" stroke-width="0.8"/>' +
   '</svg>';
 
+/** Hold-urgency thresholds, in gold. Chosen against the actual earn rate: a
+ * couple of bot kills lands you in t2, a good run without banking reaches
+ * t3, and t4 is "you are carrying a shipyard upgrade around in a wooden box".
+ * HOLD_METER_FULL is where the fill bar saturates. */
+const HOLD_TIER_MID = 150;
+const HOLD_TIER_HIGH = 400;
+const HOLD_TIER_CRITICAL = 800;
+const HOLD_METER_FULL = 1000;
+const HOLD_TIERS = ['t1', 't2', 't3', 't4'] as const;
+
 /** Purely a display for whatever EconomySnapshot the server last confirmed —
  * buy/loadout buttons just send requests over the network and wait for the
  * next snapshot to reflect the result, rather than mutating local state. */
@@ -25,7 +35,13 @@ export class HUD {
   private goldAmount = document.getElementById('gold-amount') as HTMLSpanElement;
   private holdCounter = document.getElementById('hold-counter') as HTMLDivElement | null;
   private holdAmount = document.getElementById('hold-amount') as HTMLSpanElement | null;
-  private holdRisk = document.getElementById('hold-risk') as HTMLSpanElement | null;
+  private holdRisk = document.getElementById('hold-risk') as HTMLDivElement | null;
+  private holdState = document.getElementById('hold-state') as HTMLSpanElement | null;
+  private holdMeterFill = document.getElementById('hold-meter-fill') as HTMLDivElement | null;
+  private spawnShield = document.getElementById('spawn-shield') as HTMLDivElement | null;
+  private spawnShieldText = document.getElementById('spawn-shield-text') as HTMLSpanElement | null;
+  private bankedBurst = document.getElementById('banked-burst') as HTMLDivElement | null;
+  private bankedBurstAmount = document.getElementById('banked-burst-amount') as HTMLDivElement | null;
   private bankedFlashTimeout: number | undefined;
   private banner = document.getElementById('message-banner') as HTMLDivElement;
   private shipyard = document.getElementById('shipyard') as HTMLDivElement;
@@ -82,23 +98,62 @@ export class HUD {
 
   /** Unbanked gold and how much of it would actually spill if sunk right
    * now. Hidden entirely when the hold is empty so it isn't permanent HUD
-   * furniture — it should appear as a consequence of going out to sea. */
+   * furniture — it should appear as a consequence of going out to sea.
+   *
+   * The tier class is the whole point: a 40-gold hold and an 900-gold hold
+   * are completely different situations and must not look the same. The
+   * thresholds are deliberately coarse (roughly: pocket change / worth
+   * losing / worth running home for / drop everything) because the player
+   * reads this in peripheral vision while being chased, not by studying it.
+   */
   setHold(hold: number, atRisk: number, inSanctuary: boolean) {
     if (!this.holdCounter || !this.holdAmount || !this.holdRisk) return;
-    this.holdCounter.classList.toggle('hidden', hold <= 0);
-    this.holdAmount.textContent = String(Math.floor(hold));
-    this.holdRisk.textContent = inSanctuary ? 'banking…' : atRisk > 0 ? `−${atRisk} if sunk` : '';
+    const amount = Math.floor(hold);
+    this.holdCounter.classList.toggle('hidden', amount <= 0);
+    this.holdAmount.textContent = String(amount);
+
+    const tier = amount >= HOLD_TIER_CRITICAL ? 't4' : amount >= HOLD_TIER_HIGH ? 't3' : amount >= HOLD_TIER_MID ? 't2' : 't1';
+    for (const t of HOLD_TIERS) this.holdCounter.classList.toggle(t, t === tier && !inSanctuary);
+    this.holdCounter.classList.toggle('safe', inSanctuary);
+
+    if (this.holdMeterFill) {
+      this.holdMeterFill.style.width = `${Math.min(1, amount / HOLD_METER_FULL) * 100}%`;
+    }
+    if (this.holdState) {
+      this.holdState.textContent = inSanctuary ? 'safe in port' : tier === 't4' ? 'run for port' : 'at risk';
+    }
+    this.holdRisk.textContent = inSanctuary
+      ? 'Banking to your vault'
+      : atRisk > 0
+        ? `−${atRisk} spills if you sink`
+        : 'Nothing to lose yet';
   }
 
-  /** Briefly tints the hold readout on a successful bank. Placeholder for the
-   * real "gold slides into the vault" moment — mobile-ux/sound-design. */
-  flashBanked() {
+  /** Seconds of post-respawn immunity. Transient by design — the chip is
+   * removed the instant it lapses rather than sitting at "0s". */
+  setSpawnProtection(seconds: number) {
+    if (!this.spawnShield || !this.spawnShieldText) return;
+    const active = seconds > 0.05;
+    this.spawnShield.classList.toggle('hidden', !active);
+    if (active) this.spawnShieldText.textContent = `Immune ${Math.ceil(seconds)}s`;
+  }
+
+  /** The moment a voyage resolves: unbanked gold becomes permanent. Gets a
+   * full-screen burst rather than a tint, because banking is the payoff the
+   * entire risk curve has been building toward — if anything on the HUD
+   * earns a big animation, it is this. */
+  flashBanked(amount?: number) {
+    if (this.bankedBurst && this.bankedBurstAmount && amount && amount > 0) {
+      this.bankedBurstAmount.textContent = `+${Math.floor(amount)}`;
+      // Restart the animation even if one is already running.
+      this.bankedBurst.classList.remove('show');
+      void this.bankedBurst.offsetWidth;
+      this.bankedBurst.classList.add('show');
+    }
     if (!this.holdCounter) return;
-    this.holdCounter.classList.remove('hidden');
-    this.holdCounter.classList.add('banked');
+    this.holdCounter.classList.add('safe');
     window.clearTimeout(this.bankedFlashTimeout);
     this.bankedFlashTimeout = window.setTimeout(() => {
-      this.holdCounter?.classList.remove('banked');
       if (Number(this.holdAmount?.textContent ?? '0') <= 0) this.holdCounter?.classList.add('hidden');
     }, 900);
   }
@@ -142,6 +197,7 @@ export class HUD {
     this.latestEconomy = economy;
     this.setGold(economy.gold);
     this.setHold(economy.hold, economy.holdAtRisk, economy.inSanctuary);
+    this.setSpawnProtection(economy.spawnProtection);
     this.setHeat(economy.heat);
     if (this.isShipyardOpen()) this.renderShipyard(economy);
   }

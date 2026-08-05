@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real
+         values; without it every safe-area offset in style.css silently
+         resolves to 0 and the bottom control bar sits under the home
+         indicator on a notched phone. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Rogue Tides — Pirate Ship 3D</title>
   </head>
   <body>
@@ -31,12 +38,33 @@
             <span id="gold-amount">0</span>
           </div>
           <!-- Unbanked gold "in the hold": earned at sea, lost if you sink,
-               banked automatically when you reach port. Placeholder styling —
-               mobile-ux owns making the at-risk state read urgently enough. -->
+               banked automatically when you reach port. The single most
+               consequential number in a voyage, so it is deliberately the
+               largest type on the HUD and escalates (colour, glow, pulse)
+               as the haul grows — see #hold-counter in style.css. -->
           <div id="hold-counter" class="hidden">
-            <span id="hold-label">HOLD</span>
-            <span id="hold-amount">0</span>
-            <span id="hold-risk"></span>
+            <div class="hold-head">
+              <span class="hold-tag">In hold</span>
+              <span id="hold-state"></span>
+            </div>
+            <div class="hold-main">
+              <svg class="icon icon-coin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="10" fill="currentColor" />
+                <circle cx="12" cy="12" r="7" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1" />
+                <path d="M12 5.5v13M5.5 12h13M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" stroke="rgba(0,0,0,0.35)" stroke-width="0.8" />
+              </svg>
+              <span id="hold-amount">0</span>
+            </div>
+            <div id="hold-meter"><div id="hold-meter-fill"></div></div>
+            <div id="hold-risk"></div>
+          </div>
+          <!-- Post-respawn immunity countdown. Only rendered while the timer
+               is running: it is a temporary state, not HUD furniture. -->
+          <div id="spawn-shield" class="hidden">
+            <svg class="icon icon-shield" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 2.6l7 2.6v6.1c0 4.3-2.9 8.2-7 10.1-4.1-1.9-7-5.8-7-10.1V5.2l7-2.6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+            </svg>
+            <span id="spawn-shield-text">Immune</span>
           </div>
         </div>
         <div id="hud-top-right">
@@ -67,6 +95,13 @@
           </div>
         </div>
         <div id="message-banner"></div>
+        <!-- The payoff moment of an entire voyage: the hold becoming
+             permanent gold. Deliberately big, centred and unmissable —
+             nothing else in the HUD is allowed to look like this. -->
+        <div id="banked-burst">
+          <div id="banked-burst-amount"></div>
+          <div id="banked-burst-label">banked — yours for good</div>
+        </div>
       </div>
 
       <canvas id="minimap"></canvas>
@@ -151,6 +186,13 @@
       <div id="tutorial" class="hidden">
         <div id="tutorial-panel" class="panel-wood">
           <h2>Ahoy, Captain!</h2>
+          <!-- Scroll container, mirroring #shipyard-scroll. Measured at
+               375x667 this panel rendered 849px tall inside a 667px viewport:
+               "Set Sail" sat at y=684..728, entirely below the fold, and
+               elementFromPoint at its centre returned null — a first-time
+               player on an iPhone SE/8 could not dismiss the tutorial at all.
+               Adding the ammo table below would have made that worse. -->
+          <div id="tutorial-scroll">
           <ul class="tutorial-tips">
             <li>
               <strong>Steer:</strong>
@@ -163,6 +205,65 @@
               to broadside — pull up alongside an enemy so your port/starboard cannons bear. Ramming at
               speed damages you both, too. <strong>Other captains are fair game anywhere outside port.</strong>
             </li>
+          </ul>
+
+          <h3 class="tutorial-subhead">Know your shot</h3>
+          <p class="tutorial-lede">
+            The rack along the bottom of the screen loads a different shot. They are not
+            cosmetic — each one trades damage for something else.
+          </p>
+          <ul class="ammo-table">
+            <li>
+              <span class="ammo-table-icon">
+                <span class="ammo-icon ammo-icon-round"></span>
+              </span>
+              <span class="ammo-table-body">
+                <strong>Round</strong> — full damage, normal reload. The dependable broadside;
+                use it when nothing cleverer is called for.
+              </span>
+            </li>
+            <li>
+              <span class="ammo-table-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="6" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <circle cx="18" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <path d="M9.4 12h5.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </span>
+              <span class="ammo-table-body">
+                <strong>Chain</strong> — half damage and a slower reload, but it shreds their
+                rigging: their top speed drops to a third for 3.5 seconds. The way to stop a
+                captain with a fat hold from reaching port.
+              </span>
+            </li>
+            <li>
+              <span class="ammo-table-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="12" cy="6.5" r="2.4" fill="currentColor" />
+                  <circle cx="6.8" cy="11.5" r="2.4" fill="currentColor" />
+                  <circle cx="17.2" cy="11.5" r="2.4" fill="currentColor" />
+                  <circle cx="12" cy="16.5" r="2.4" fill="currentColor" />
+                </svg>
+              </span>
+              <span class="ammo-table-body">
+                <strong>Grape</strong> — 60% <em>more</em> damage point-blank, 40% less at any
+                real range. Rewards sailing right alongside.
+              </span>
+            </li>
+            <li>
+              <span class="ammo-table-icon ammo-table-icon-fire">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 2.5c1.1 2.6-1.6 3.9-1.9 6.4-.2 1.6.8 2.6 2 2.6a2.4 2.4 0 002.4-2.4c0-.7-.2-1.1-.5-1.6 1.6.9 2.6 2.8 2.6 4.9A4.6 4.6 0 0112 17a4.7 4.7 0 01-4.7-4.7c0-3.9 3-5.6 4.7-9.8z" fill="currentColor" />
+                </svg>
+              </span>
+              <span class="ammo-table-body">
+                <strong>Fire</strong> — only 40% on impact, then burns for 70% more over the next
+                4 seconds. The most total damage of any shot, but only if they live long enough
+                to burn — and it finishes a fleeing ship you can no longer hit.
+              </span>
+            </li>
+          </ul>
+          <ul class="tutorial-tips">
             <li>
               <strong>Your hold:</strong> gold you earn at sea is <em>unbanked</em> — sink and most of it
               spills into the water for anyone to scoop up. Sail into home port to bank it permanently.
@@ -174,6 +275,7 @@
             <li><strong>Heat:</strong> sinking ships raises your wanted meter — sinking <em>captains</em> raises it far faster. High heat draws hunters and makes every bot around prefer you. Let it cool at port.</li>
             <li><strong>Chat:</strong> press Enter or tap the chat icon to talk to other captains.</li>
           </ul>
+          </div>
           <button id="tutorial-close" class="btn-primary">Set Sail</button>
         </div>
       </div>
@@ -186,41 +288,74 @@
         <span>Open Shipyard</span>
       </button>
 
+      <!-- First-run coach mark for the ammo rack. Shown once per device the
+           first time the HUD appears, dismissed by tapping anywhere on it or
+           by picking any shot. A hover tooltip could never do this job: the
+           priority platform has no hover. -->
+      <div id="ammo-coach" class="hidden">
+        <strong>Pick your shot.</strong> The rack at the bottom loads chain, grape or fire —
+        each trades damage for an effect, and the line above it always says what the loaded
+        shot does. <span class="ammo-coach-dismiss">Tap to dismiss</span>
+      </div>
+
       <div id="chat-log"></div>
       <div id="chat-input-wrap" class="hidden">
         <input id="chat-input" type="text" maxlength="140" placeholder="Say something… (Enter to send, Esc to cancel)" autocomplete="off" />
       </div>
 
-      <div id="ammo-selector">
-        <button class="ammo-btn active" data-ammo="round" title="Round Shot — full damage, the reliable default">
-          <span class="ammo-icon ammo-icon-round"></span><span class="ammo-key desktop-hint">1</span>
-        </button>
-        <button class="ammo-btn" data-ammo="chain" title="Chain Shot — less damage, fouls the target's rigging">
-          <span class="ammo-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <circle cx="6" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
-              <circle cx="18" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
-              <path d="M9.4 12h5.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </span><span class="ammo-key desktop-hint">2</span>
-        </button>
-        <button class="ammo-btn" data-ammo="grape" title="Grapeshot — a close-range shotgun blast, weak at range">
-          <span class="ammo-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <circle cx="12" cy="6.5" r="2.4" fill="currentColor" />
-              <circle cx="6.8" cy="11.5" r="2.4" fill="currentColor" />
-              <circle cx="17.2" cy="11.5" r="2.4" fill="currentColor" />
-              <circle cx="12" cy="16.5" r="2.4" fill="currentColor" />
-            </svg>
-          </span><span class="ammo-key desktop-hint">3</span>
-        </button>
-        <button class="ammo-btn" data-ammo="fire" title="Fire Shot — light weak, but sets the target ablaze">
-          <span class="ammo-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 2.5c1.1 2.6-1.6 3.9-1.9 6.4-.2 1.6.8 2.6 2 2.6a2.4 2.4 0 002.4-2.4c0-.7-.2-1.1-.5-1.6 1.6.9 2.6 2.8 2.6 4.9A4.6 4.6 0 0112 17a4.7 4.7 0 01-4.7-4.7c0-3.9 3-5.6 4.7-9.8z" fill="currentColor" />
-            </svg>
-          </span><span class="ammo-key desktop-hint">4</span>
-        </button>
+      <!-- The ammo rack. Every button carries a permanent name and a
+           three-word effect tag, and the strip above it spells out the exact
+           trade for whichever shot is loaded. The descriptions used to live
+           only in `title=` attributes — i.e. hover tooltips, which do not
+           exist on touch, so on the priority platform the entire mechanic was
+           invisible. Nothing here depends on hover, long-press or a manual. -->
+      <div id="bottom-bar">
+        <div id="ammo-detail">
+          <span id="ammo-detail-text">Full damage, normal reload — the dependable broadside.</span>
+        </div>
+        <div id="ammo-selector">
+          <button class="ammo-btn active" data-ammo="round" aria-pressed="true">
+            <span class="ammo-icon ammo-icon-round"></span>
+            <span class="ammo-name">Round</span>
+            <span class="ammo-tag">full damage</span>
+            <span class="ammo-key desktop-hint">1</span>
+          </button>
+          <button class="ammo-btn" data-ammo="chain" aria-pressed="false">
+            <span class="ammo-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="6" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+                <circle cx="18" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+                <path d="M9.4 12h5.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="ammo-name">Chain</span>
+            <span class="ammo-tag">stops runners</span>
+            <span class="ammo-key desktop-hint">2</span>
+          </button>
+          <button class="ammo-btn" data-ammo="grape" aria-pressed="false">
+            <span class="ammo-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="6.5" r="2.4" fill="currentColor" />
+                <circle cx="6.8" cy="11.5" r="2.4" fill="currentColor" />
+                <circle cx="17.2" cy="11.5" r="2.4" fill="currentColor" />
+                <circle cx="12" cy="16.5" r="2.4" fill="currentColor" />
+              </svg>
+            </span>
+            <span class="ammo-name">Grape</span>
+            <span class="ammo-tag">point-blank</span>
+            <span class="ammo-key desktop-hint">3</span>
+          </button>
+          <button class="ammo-btn" data-ammo="fire" aria-pressed="false">
+            <span class="ammo-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 2.5c1.1 2.6-1.6 3.9-1.9 6.4-.2 1.6.8 2.6 2 2.6a2.4 2.4 0 002.4-2.4c0-.7-.2-1.1-.5-1.6 1.6.9 2.6 2.8 2.6 4.9A4.6 4.6 0 0112 17a4.7 4.7 0 01-4.7-4.7c0-3.9 3-5.6 4.7-9.8z" fill="currentColor" />
+              </svg>
+            </span>
+            <span class="ammo-name">Fire</span>
+            <span class="ammo-tag">burns them</span>
+            <span class="ammo-key desktop-hint">4</span>
+          </button>
+        </div>
       </div>
 
       <div id="touch-controls">

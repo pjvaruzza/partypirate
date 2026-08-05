@@ -15,6 +15,26 @@
   --blood: #7a1f14;
   --ember: #ff7a1a;
   --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, 'Times New Roman', serif;
+
+  /* One source of truth for the height of the bottom ammo rack, so the
+     joystick / fire / boost / port button all sit above it by construction
+     instead of by four hand-tuned magic numbers that drift apart. Every
+     bottom-anchored control offsets from --bottom-bar-h.
+       4px pad + 28px detail strip + 3px gap + 54px cells + 4px pad = 93px
+     plus the 6px gutter and the device's own bottom safe area. */
+  --ammo-detail-h: 28px;
+  --ammo-cell-h: 54px;
+  --bottom-bar-gutter: 6px;
+  --bottom-bar-h: calc(
+    93px + var(--bottom-bar-gutter) + env(safe-area-inset-bottom, 0px)
+  );
+}
+
+/* Nothing in the HUD ever wants a `hidden` element laid out — there was no
+   global rule for this, so `#hold-counter.hidden` (set by HUD.setHold for an
+   empty hold) still rendered, leaving a permanent "HOLD 0" on screen. */
+.hidden {
+  display: none !important;
 }
 
 * {
@@ -83,9 +103,13 @@ body {
     inset 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
+/* Trimmed from 200x16. By sheer area a full-width orange bar was the
+   loudest object on a 375px HUD, which is wrong: health is a gauge you
+   glance at, the hold below it is the thing you are gambling. Still the
+   widest element in the stack, just no longer the shoutiest. */
 #health-bar {
-  width: 200px;
-  height: 16px;
+  width: 168px;
+  height: 13px;
 }
 
 #health-fill {
@@ -97,8 +121,8 @@ body {
 }
 
 #heat-bar {
-  width: 200px;
-  height: 10px;
+  width: 168px;
+  height: 9px;
 }
 
 #heat-bar.hidden {
@@ -118,7 +142,9 @@ body {
   align-items: center;
   gap: 6px;
   font-family: var(--font-display);
-  font-size: 18px;
+  /* Deliberately stepped down from 18px: banked gold is settled and quiet,
+     the hold below it is the live stake and must out-shout it. */
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--parchment);
@@ -138,45 +164,297 @@ body {
   flex: 0 0 auto;
 }
 
-/* Unbanked hold gold. Sits directly under the banked counter so the two
-   numbers read as a pair: the safe one and the one you can lose. Placeholder
-   treatment — mobile-ux owns the real hierarchy/urgency design. */
+/* ---------------------------------------------------------------------
+   THE HOLD — unbanked gold, and the loudest thing on the screen.
+
+   Banked gold (#gold-counter) is a settled fact and reads like one: small,
+   quiet, one line. The hold is a live stake, so it gets the largest numeral
+   in the HUD, a fill meter, and four escalation tiers. The colour walks
+   brass -> amber -> ember -> blood as the haul grows, and the top two tiers
+   breathe. Nothing else in the HUD is allowed to pulse, so the pulse means
+   exactly one thing: you are carrying more than you can afford to lose.
+   --------------------------------------------------------------------- */
 #hold-counter {
+  --hold-accent: #ffd76a;
+  --hold-glow: rgba(255, 190, 90, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Sized so the widest header pair ("IN HOLD" + "RUN FOR PORT") and the
+     widest risk line both clear on one line — at 156px they wrapped into
+     two ragged stacked columns that read as a layout bug. */
+  width: 176px;
+  padding: 5px 10px 6px;
+  border-radius: 4px;
+  font-family: var(--font-display);
+  color: var(--hold-accent);
+  background: linear-gradient(160deg, #2c1c06, #150e07 70%);
+  box-shadow:
+    0 0 0 1px var(--hold-glow),
+    0 0 10px -2px var(--hold-glow),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  transition: box-shadow 0.3s ease, color 0.3s ease, background 0.3s ease;
+}
+
+.hold-head {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 6px;
-  font-family: var(--font-display);
-  font-size: 14px;
+}
+
+.hold-tag {
+  font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #ffd76a;
-  background: linear-gradient(160deg, #2c1c06, #17100a);
-  padding: 3px 10px;
-  border-radius: 4px;
-  width: fit-content;
-  box-shadow:
-    0 0 0 1px rgba(255, 190, 90, 0.45),
-    inset 0 1px 1px rgba(255, 255, 255, 0.08);
-}
-
-#hold-counter #hold-label {
-  font-size: 10px;
   letter-spacing: 0.12em;
-  opacity: 0.75;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.65;
 }
 
-#hold-counter #hold-risk {
-  font-size: 11px;
-  font-weight: 600;
-  color: #ff9a6a;
+#hold-state {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
   opacity: 0.9;
 }
 
-#hold-counter.banked {
-  color: #b8ffcf;
-  box-shadow:
-    0 0 0 1px rgba(120, 255, 180, 0.7),
-    inset 0 1px 1px rgba(255, 255, 255, 0.12);
+.hold-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+
+.hold-main .icon-coin {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+/* 28px, against the banked counter's 16px. The size difference is the
+   hierarchy: whichever number is bigger is the one at stake. */
+#hold-amount {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.85);
+  transition: font-size 0.25s ease;
+}
+
+/* How full the hold is, as a bar — an at-a-glance "how deep am I in?" that
+   needs no reading. Saturates at 1000, the point where the top tier says
+   you should already be sailing home. */
+#hold-meter {
+  height: 4px;
+  margin-top: 1px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+#hold-meter-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--hold-accent), #fff2c4);
+  transition: width 0.35s ease, background 0.3s ease;
+}
+
+#hold-risk {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #ffb08a;
+  opacity: 0.95;
+}
+
+/* --- escalation tiers ------------------------------------------------- */
+/* t1 (<150) keeps the defaults above: a small haul is genuinely low stakes. */
+#hold-counter.t2 {
+  --hold-accent: #ffc247;
+  --hold-glow: rgba(255, 170, 60, 0.6);
+}
+
+#hold-counter.t3 {
+  --hold-accent: #ff9430;
+  --hold-glow: rgba(255, 120, 40, 0.75);
+  animation: hold-breathe 2.2s ease-in-out infinite;
+}
+
+#hold-counter.t4 {
+  --hold-accent: #ff6a4d;
+  --hold-glow: rgba(255, 70, 40, 0.9);
+  background: linear-gradient(160deg, #3a1108, #1b0b06 70%);
+  animation: hold-breathe 1.1s ease-in-out infinite;
+}
+
+#hold-counter.t3 #hold-amount {
+  font-size: 31px;
+}
+
+#hold-counter.t4 #hold-amount {
+  font-size: 34px;
+}
+
+#hold-counter.t4 #hold-risk {
+  color: #ff9c85;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+@keyframes hold-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--hold-glow),
+      0 0 10px -2px var(--hold-glow),
+      inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1.5px var(--hold-glow),
+      0 0 20px 1px var(--hold-glow),
+      inset 0 1px 1px rgba(255, 255, 255, 0.14);
+  }
+}
+
+/* --- safe in port ----------------------------------------------------- */
+/* The instant the sanctuary ring is crossed the whole block flips from hot
+   to a calm sea-green and the pulse stops. That colour change IS the "you
+   made it" signal — it's visible in peripheral vision without reading a
+   word, which is the point when you've just been chased home. */
+#hold-counter.safe {
+  --hold-accent: #7dffb4;
+  --hold-glow: rgba(110, 255, 175, 0.75);
+  background: linear-gradient(160deg, #07301d, #061a12 70%);
+  animation: none;
+}
+
+#hold-counter.safe #hold-risk {
+  color: #a8ffd0;
+}
+
+#hold-counter.safe #hold-amount {
+  font-size: 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #hold-counter.t3,
+  #hold-counter.t4 {
+    animation: none;
+  }
+}
+
+/* Post-respawn immunity. A transient chip, not permanent furniture —
+   HUD.setSpawnProtection hides it the moment the timer expires. */
+#spawn-shield {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #bfe9ff;
+  background: linear-gradient(160deg, rgba(12, 40, 60, 0.9), rgba(6, 18, 28, 0.9));
+  box-shadow: 0 0 0 1px rgba(140, 216, 255, 0.6), 0 0 10px -3px rgba(140, 216, 255, 0.8);
+}
+
+#spawn-shield .icon-shield {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+/* The banked moment. A voyage resolving is the payoff of the whole loop and
+   previously nothing marked it but a 900ms tint on a 14px div. */
+#banked-burst {
+  position: absolute;
+  /* Below the minimap's lower edge (258px at 375x667, ~39% of the viewport)
+     — at 34% the label ran underneath it and was unreadable. */
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.82);
+  padding: 20px 34px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  color: #a6ffcf;
+  /* Its own scrim: this fires over open water, a foam crest or an island
+     cliff depending on where the port ring was crossed, and it has exactly
+     one chance to land. */
+  background: radial-gradient(ellipse at center, rgba(2, 14, 9, 0.8) 0%, rgba(2, 14, 9, 0.55) 45%, rgba(2, 14, 9, 0) 75%);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95), 0 0 26px rgba(80, 255, 170, 0.5);
+}
+
+#banked-burst.show {
+  animation: banked-pop 1.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+#banked-burst-amount {
+  font-family: var(--font-display);
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+#banked-burst-label {
+  margin-top: 5px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  color: #d8ffe9;
+  white-space: nowrap;
+}
+
+@keyframes banked-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+  30% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  72% {
+    opacity: 1;
+    transform: translate(-50%, -62%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -78%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #banked-burst.show {
+    animation: banked-fade 1.7s ease forwards;
+  }
+  @keyframes banked-fade {
+    0%,
+    70% {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
 }
 
 #hud-top-right {
@@ -663,19 +941,114 @@ body {
   flex: 0 0 auto;
 }
 
+/* Same capped-height + inner-scroll structure as #shipyard-panel. Without
+   it this panel rendered 849px tall in a 667px viewport and its only close
+   button sat below the fold, unhittable — a first-time player on an
+   iPhone 8/SE could not get past the tutorial. */
 #tutorial-panel {
-  padding: 24px 28px;
-  width: min(90vw, 440px);
+  padding: 20px 24px;
+  width: min(92vw, 440px);
+  max-height: calc(100vh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
 }
 
 #tutorial-panel h2 {
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   font-size: 26px;
   text-align: center;
+  flex: 0 0 auto;
+}
+
+#tutorial-scroll {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+/* Fades the last few pixels of the scroll area while there is more below,
+   and only while there is more below — a permanent fade would blur the
+   final line once you had actually reached the end. Toggled by Tutorial.ts
+   on scroll. On a phone the panel is capped well short of its content, so
+   without a cue a player can miss everything past the fold. */
+#tutorial-scroll.more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), rgba(0, 0, 0, 0.15) 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), rgba(0, 0, 0, 0.15) 100%);
+}
+
+.tutorial-subhead {
+  margin: 14px 0 6px;
+  font-size: 17px;
+}
+
+.tutorial-subhead::after {
+  display: none;
+}
+
+.tutorial-lede {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
+/* One row per shot: icon in a recessed disc, then the trade in plain words.
+   This is the long-form of what the rack shows at a glance. */
+.ammo-table {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ammo-table li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ammo-table strong {
+  font-variant: small-caps;
+  color: var(--blood);
+  letter-spacing: 0.02em;
+}
+
+.ammo-table-icon {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(27, 16, 6, 0.12);
+  box-shadow: inset 0 1px 3px rgba(27, 16, 6, 0.35);
+  color: var(--wood-dark);
+}
+
+.ammo-table-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ammo-table-icon-fire {
+  color: #a83a08;
+}
+
+.ammo-table-icon .ammo-icon-round {
+  width: 12px;
+  height: 12px;
 }
 
 .tutorial-tips {
-  margin: 0 0 20px;
+  margin: 0 0 4px;
   padding: 0;
   list-style: none;
   display: flex;
@@ -773,13 +1146,43 @@ body {
   #shipyard-close {
     margin-top: 6px;
   }
+
+  /* Same compaction for the tutorial: it now carries the ammo table too, so
+     tightening the chrome buys back more of it per screenful of scrolling. */
+  #tutorial-panel {
+    padding: 12px 16px;
+    border-width: 4px;
+  }
+
+  #tutorial-panel h2 {
+    margin: 0 0 8px;
+    font-size: 21px;
+  }
+
+  .tutorial-tips li,
+  .ammo-table li {
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  .tutorial-tips {
+    gap: 9px;
+  }
 }
 
+#tutorial-close {
+  margin-top: 14px;
+  flex: 0 0 auto;
+}
+
+/* Right-aligned above the fire button rather than bottom-centred: centred,
+   its 177px width crossed the joystick's column, and the joystick is needed
+   in port too (you still have to sail out). It only appears inside the
+   sanctuary, where the ammo rack below it is inert anyway. */
 #port-btn {
   position: absolute;
-  bottom: 130px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: calc(var(--bottom-bar-h) + 96px);
+  right: 20px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -803,16 +1206,24 @@ body {
   flex: 0 0 auto;
 }
 
-#port-btn.hidden {
-  display: none;
+/* Desktop has no joystick to dodge, so the port button goes back to the
+   centre where the eye already is. */
+@media (hover: hover) and (pointer: fine) {
+  #port-btn {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(var(--bottom-bar-h) + 24px);
+  }
 }
 
 #chat-log {
   position: absolute;
   left: 16px;
-  bottom: 170px;
+  bottom: calc(var(--bottom-bar-h) + 152px);
   width: min(320px, 60vw);
-  max-height: 160px;
+  /* 160px put the log's top edge under the minimap at 375x667. */
+  max-height: 140px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -846,13 +1257,9 @@ body {
 #chat-input-wrap {
   position: absolute;
   left: 16px;
-  bottom: 170px;
+  bottom: calc(var(--bottom-bar-h) + 152px);
   width: min(320px, 60vw);
   pointer-events: auto;
-}
-
-#chat-input-wrap.hidden {
-  display: none;
 }
 
 #chat-input {
@@ -873,10 +1280,13 @@ body {
   pointer-events: none;
 }
 
+/* Every bottom control now offsets from --bottom-bar-h so the ammo rack can
+   never be sat on (or sit on) a control again. Left/right insets respect the
+   safe area for landscape notches. */
 #joystick-zone {
   position: absolute;
-  left: 24px;
-  bottom: 24px;
+  left: max(24px, calc(env(safe-area-inset-left, 0px) + 12px));
+  bottom: calc(var(--bottom-bar-h) + 6px);
   width: 130px;
   height: 130px;
   pointer-events: auto;
@@ -906,7 +1316,7 @@ body {
 #fire-btn,
 #boost-btn {
   position: absolute;
-  bottom: 30px;
+  bottom: calc(var(--bottom-bar-h) + 8px);
   width: 76px;
   height: 76px;
   border-radius: 50%;
@@ -932,13 +1342,13 @@ body {
 }
 
 #fire-btn {
-  right: 24px;
+  right: max(20px, calc(env(safe-area-inset-right, 0px) + 12px));
   background: radial-gradient(circle at 35% 30%, #ff8c4a, #7a1f14 80%);
 }
 
 #boost-btn {
-  right: 116px;
-  bottom: 46px;
+  right: max(104px, calc(env(safe-area-inset-right, 0px) + 96px));
+  bottom: calc(var(--bottom-bar-h) + 24px);
   width: 60px;
   height: 60px;
   background: radial-gradient(circle at 35% 30%, #5fc9e0, #14536b 80%);
@@ -959,51 +1369,174 @@ body {
   }
 }
 
-/* Not nested inside #touch-controls — ammo selection is useful on desktop
-   too (mouse click as well as the 1-4 keybinds), so it stays visible there. */
-#ammo-selector {
+/* ---------------------------------------------------------------------
+   THE AMMO RACK
+
+   Not nested inside #touch-controls — ammo selection matters on desktop too
+   (click as well as the 1-4 keybinds), so it stays visible there.
+
+   The previous version was four unlabelled 44px circles reading "1 2 3 4",
+   with every description hidden in a `title=` attribute. `title` renders as
+   a hover tooltip, and touch devices have no hover, so on the platform this
+   game is built for the entire ammo mechanic was undocumented — the owner's
+   complaint ("just 1,2,3,4 doesn't say anything") was literally accurate.
+
+   It also overlapped the controls it sat between: measured at 375x667 the
+   old strip spanned x 88..288 at y 599..643, on top of the joystick's
+   lower-right quadrant (x 24..154) and the fire button's left edge (x 275),
+   with a higher z-index — so two of the ammo buttons were stealing touches
+   from the two controls used most.
+
+   Now it is a real bottom rack: full-width, one cell per shot, each cell
+   carrying a permanent name plus a plain-language effect tag, with a strip
+   above spelling out the exact trade for the loaded shot. Everything a
+   player needs is on screen at all times, with no hover, no long-press and
+   no manual. --------------------------------------------------------- */
+#bottom-bar {
   position: absolute;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: calc(var(--bottom-bar-gutter) + env(safe-area-inset-bottom, 0px));
   display: flex;
-  gap: 8px;
-  pointer-events: auto;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px max(8px, env(safe-area-inset-left, 0px)) 4px max(8px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
   z-index: 5;
+}
+
+/* A soft scrim behind the whole rack. The detail strip is unboxed text laid
+   straight over the ocean, and the ocean is not a constant value — sun
+   glitter and crest foam are near-white. A text-shadow alone is not enough
+   contrast there; this guarantees the one line that explains the mechanic
+   is readable over any frame. Extends past the bar's own box so the fade
+   has somewhere to go. */
+#bottom-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(-1 * (var(--bottom-bar-gutter) + env(safe-area-inset-bottom, 0px)));
+  top: -18px;
+  background: linear-gradient(180deg, rgba(4, 10, 18, 0) 0%, rgba(4, 10, 18, 0.55) 38%, rgba(4, 10, 18, 0.8) 100%);
+  pointer-events: none;
+}
+
+#bottom-bar > * {
+  position: relative;
+}
+
+/* The one line that answers "what does this shot actually do?". Fixed
+   height so a two-line wrap on a narrow phone can never shove the rack
+   upward into the controls that offset from --bottom-bar-h. */
+#ammo-detail {
+  height: var(--ammo-detail-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  text-align: center;
+}
+
+#ammo-detail-text {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--parchment);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.8);
+  opacity: 0.95;
+  transition: opacity 0.18s ease;
+}
+
+#ammo-detail-text.swap {
+  opacity: 0;
+}
+
+#ammo-selector {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  width: 100%;
+  /* Uncapped, a wide desktop/landscape viewport would stretch four cells to
+     several hundred pixels each. Centred and capped it stays a rack. */
+  max-width: 520px;
+  margin: 0 auto;
+  pointer-events: auto;
 }
 
 .ammo-btn {
   position: relative;
-  /* Was 42x42 — just under the 44px touch target minimum. */
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  /* Full cell, comfortably past the 44px minimum in both axes: at 375px
+     each cell measures ~87x54. */
+  min-width: 44px;
+  height: var(--ammo-cell-h);
+  border-radius: 6px;
   border: none;
-  background: radial-gradient(circle at 35% 30%, #3a2a16, #150d05 75%);
-  box-shadow: 0 0 0 2px var(--brass-dark), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+  padding: 4px 2px 3px;
+  background: linear-gradient(180deg, rgba(46, 32, 16, 0.88), rgba(14, 9, 4, 0.92));
+  box-shadow: 0 0 0 1px var(--brass-dark), inset 0 1px 1px rgba(255, 255, 255, 0.08);
   color: var(--brass-light);
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  gap: 1px;
+  overflow: hidden;
 }
 
 .ammo-btn.active {
-  box-shadow: 0 0 0 2px var(--brass-light), 0 0 8px 1px rgba(240, 207, 106, 0.55), inset 0 1px 2px rgba(255, 255, 255, 0.15);
+  background: linear-gradient(180deg, rgba(96, 66, 24, 0.95), rgba(38, 24, 9, 0.95));
+  box-shadow:
+    0 0 0 2px var(--brass-light),
+    0 0 10px -1px rgba(240, 207, 106, 0.7),
+    inset 0 1px 2px rgba(255, 255, 255, 0.2);
+}
+
+.ammo-btn:active {
+  transform: translateY(1px);
 }
 
 .ammo-icon {
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .ammo-icon svg {
   width: 100%;
   height: 100%;
+}
+
+/* The name. Permanent, not a tooltip — this is the fix for "just 1,2,3,4". */
+.ammo-name {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  color: var(--parchment);
+  white-space: nowrap;
+}
+
+/* Three words of what it does, so the four shots can be compared without
+   selecting any of them. The precise numbers live in #ammo-detail. */
+.ammo-tag {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  color: var(--parchment);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.ammo-btn.active .ammo-tag {
+  opacity: 0.85;
 }
 
 /* Fire shot gets its own ember tint rather than inheriting the default
@@ -1016,17 +1549,146 @@ body {
 /* Round shot is a plain cannonball — a solid CSS sphere reads better than
    any icon glyph would at this size, and needs no SVG. */
 .ammo-icon-round {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #8a8a8a, #1a1a1a 75%);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  /* Brighter than the true cast-iron value it wants to be: dark-on-dark at
+     14px this read as an empty cell next to three lit icons. */
+  background: radial-gradient(circle at 34% 28%, #e2e2e2, #6a6a6a 55%, #24242a 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
 }
 
+/* Keyboard hint, desktop only (.desktop-hint is display:none on coarse
+   pointers), tucked into the cell corner rather than hanging below it. */
 .ammo-key {
   position: absolute;
-  bottom: -15px;
+  top: 3px;
+  right: 5px;
   font-family: var(--font-display);
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 9.5px;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+/* First-run coach mark. The rack is self-describing once you look at it,
+   but nothing otherwise draws the eye down there on the first voyage.
+   Deliberately sits ABOVE the joystick / fire / boost row rather than in a
+   speech-bubble over the rack: a one-time panel that swallows the first tap
+   on FIRE would be a worse bug than the problem it solves. The rack itself
+   is glowed via .coach-target so the reference is unambiguous. */
+#ammo-coach {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--bottom-bar-h) + 148px);
+  transform: translateX(-50%);
+  width: min(320px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: linear-gradient(160deg, rgba(58, 40, 18, 0.97), rgba(20, 13, 5, 0.97));
+  box-shadow: 0 0 0 1.5px var(--brass), 0 8px 24px rgba(0, 0, 0, 0.6);
+  color: var(--parchment);
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 6;
+  animation: coach-in 0.35s ease both;
+}
+
+#ammo-coach strong {
+  color: var(--brass-light);
+}
+
+.ammo-coach-dismiss {
+  display: block;
+  margin-top: 5px;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+#ammo-selector.coach-target .ammo-btn {
+  animation: coach-glow 1.4s ease-in-out infinite;
+}
+
+@keyframes coach-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--brass-dark), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--brass-light), 0 0 12px 0 rgba(240, 207, 106, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ammo-selector.coach-target .ammo-btn,
+  #ammo-coach {
+    animation: none;
+  }
+}
+
+@keyframes coach-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Old-SE-class widths (320px). The top band carries the health bar, the
+   hold block, the ship name, three 44px icon buttons and a 150px minimap;
+   at 320px the hold block ran under both the icon row and the minimap
+   (measured: hold 16..192 vs minimap 154..304, so "AT RISK" was drawn over
+   by the radar). Everything here gives width back rather than shrinking a
+   touch target below 44px. */
+@media (max-width: 360px) {
+  #hold-counter {
+    width: 144px;
+  }
+
+  /* The state word is the one redundant element in the block — the tier
+     colour, the pulse and the numeral size already say "this is bad", and
+     the risk line still spells out the consequence. */
+  #hold-state {
+    display: none;
+  }
+
+  #hold-amount {
+    font-size: 25px;
+  }
+
+  #hold-counter.t3 #hold-amount {
+    font-size: 27px;
+  }
+
+  #hold-counter.t4 #hold-amount {
+    font-size: 29px;
+  }
+
+  #health-bar,
+  #heat-bar {
+    width: 140px;
+  }
+
+  #minimap {
+    width: 116px;
+    height: 116px;
+    top: 100px;
+    right: 12px;
+  }
+
+  #hud-top-right {
+    right: 12px;
+  }
+
+  #hud-icon-row {
+    gap: 6px;
+  }
 }

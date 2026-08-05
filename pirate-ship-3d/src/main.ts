@@ -396,6 +396,9 @@ network.onWelcome = (msg) => {
   ocean.setIslands(msg.islands);
   joinScreen.classList.add('hidden');
   tutorial.showIfFirstVisit();
+  // Don't stack the ammo coach mark on top of the tutorial overlay — it
+  // waits for the tutorial to be dismissed (see tutorial.onClose below).
+  if (!tutorial.isOpen()) input.ammoRack.showCoachIfFirstVisit();
 };
 network.onDisconnect = () => {
   clearWorldState();
@@ -426,6 +429,7 @@ portBtn.addEventListener('click', () => {
 
 // --- input ------------------------------------------------------------------
 const input = new InputManager();
+tutorial.onClose = () => input.ammoRack.showCoachIfFirstVisit();
 
 // --- camera rig ---------------------------------------------------------
 // Was (0, 7, 13), i.e. looking down at the ship at ~23°. At that pitch a hull
@@ -508,10 +512,9 @@ function handleEvents(events: GameEvent[]) {
       triggerHitstop(0.09);
     } else if (ev.type === 'banked') {
       // Distinct from a 'gold' pickup: this is the moment the hold becomes
-      // permanent. Needs its own sound cue (flagged to sound-design) and a
-      // proper HUD transition (flagged to mobile-ux) — the message banner is
-      // the placeholder.
-      hud.flashBanked();
+      // permanent — the resolution of a whole voyage. Still needs its own
+      // sound cue (flagged to sound-design).
+      hud.flashBanked(ev.amount);
     } else if (ev.type === 'message') {
       hud.showMessage(ev.text, ev.duration);
     } else if (ev.type === 'chat') {
@@ -692,6 +695,8 @@ function animate() {
         world.islands.map((isl) => ({ x: isl.position.x, z: isl.position.z, radius: isl.radius, isHomePort: isl.isHomePort })),
         snapshot,
         network.yourId,
+        network.state?.crates ?? [],
+        network.state?.salvage ?? [],
       );
     }
   }

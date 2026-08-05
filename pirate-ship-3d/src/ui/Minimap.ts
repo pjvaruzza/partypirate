@@ -14,6 +14,12 @@ export interface MinimapIsland {
   isHomePort: boolean;
 }
 
+export interface MinimapPickup {
+  x: number;
+  z: number;
+  value: number;
+}
+
 function drawTriangle(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -60,8 +66,11 @@ export class Minimap {
     islands: MinimapIsland[],
     ships: ShipSnapshot[],
     yourId: string,
+    crates: MinimapPickup[] = [],
+    salvage: MinimapPickup[] = [],
   ) {
     const ctx = this.ctx;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
     ctx.clearRect(0, 0, SIZE, SIZE);
 
     ctx.save();
@@ -88,6 +97,43 @@ export class Minimap {
         ctx.strokeStyle = '#fff3c4';
         ctx.stroke();
       }
+    }
+
+    // Drifting cargo crates: small, muted, square. Deliberately the dullest
+    // marker on the radar so that salvage below can't be mistaken for one —
+    // a crate is worth a detour, a dead captain's hold is worth a fight.
+    for (const crate of crates) {
+      const p = toMinimap(crate.x, crate.z);
+      if (p.x < -6 || p.x > SIZE + 6 || p.y < -6 || p.y > SIZE + 6) continue;
+      // Small and desaturated on purpose: there are a lot of crates in the
+      // world and at 5px each they turned the radar into confetti.
+      ctx.fillStyle = 'rgba(174, 133, 78, 0.7)';
+      ctx.strokeStyle = 'rgba(18, 11, 4, 0.7)';
+      ctx.lineWidth = 0.8;
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      ctx.strokeRect(p.x - 2, p.y - 2, 4, 4);
+    }
+
+    // Spilled unbanked gold. The single most interesting thing that can
+    // exist in the world while it exists, so it gets the only animated
+    // marker on the radar: a bright coin with an expanding pulse ring, and
+    // a bigger dot for a bigger pile.
+    for (const pile of salvage) {
+      const p = toMinimap(pile.x, pile.z);
+      if (p.x < -14 || p.x > SIZE + 14 || p.y < -14 || p.y > SIZE + 14) continue;
+      const r = 3 + Math.min(2.6, pile.value / 260);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 2 + pulse * 5, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 226, 130, ${0.55 * (1 - pulse)})`;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd034';
+      ctx.fill();
+      ctx.strokeStyle = '#fff6d0';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
     }
 
     for (const ship of ships) {
@@ -128,6 +174,31 @@ export class Minimap {
         const ey = RADIUS + dirZ * (RADIUS - 10);
         drawTriangle(ctx, ex, ey, dirX, dirZ, 8, 5, '#e8c34a');
       }
+    }
+
+    // Nearest off-radar salvage gets its own edge marker. Salvage expires,
+    // so "there is loot that way, go now" is time-critical information and
+    // the one thing worth pointing at from beyond the radar's range besides
+    // home. Drawn as a pulsing coin rather than a triangle so it can't be
+    // confused with the home-port arrow above.
+    let nearest: { p: MinimapPickup; dist: number } | null = null;
+    for (const pile of salvage) {
+      const d = Math.hypot(pile.x - playerX, pile.z - playerZ);
+      if (d * SCALE <= RADIUS - 8) continue;
+      if (!nearest || d < nearest.dist) nearest = { p: pile, dist: d };
+    }
+    if (nearest && nearest.dist > 0.001) {
+      const dirX = (nearest.p.x - playerX) / nearest.dist;
+      const dirZ = (nearest.p.z - playerZ) / nearest.dist;
+      const ex = RADIUS + dirX * (RADIUS - 7);
+      const ey = RADIUS + dirZ * (RADIUS - 7);
+      ctx.beginPath();
+      ctx.arc(ex, ey, 3.2 + pulse * 1.6, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd034';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(20, 12, 4, 0.9)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
   }
 }
