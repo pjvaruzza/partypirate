@@ -5,6 +5,7 @@ import { Sky } from './game/Sky';
 import { Ship, cannonMountOffsets } from './game/Ship';
 import { World, buildCrateMesh } from './game/World';
 import { TreasureMarker } from './game/TreasureMarker';
+import { OutpostMarkers } from './game/OutpostMarkers';
 import { InputManager } from './game/Input';
 import { Effects } from './game/Effects';
 import { DamageNumbers } from './game/DamageNumbers';
@@ -130,6 +131,7 @@ const renderedShips = new Map<string, Ship>();
 const renderedShipClass = new Map<string, ShipSnapshot['shipClass']>();
 const renderedCrates = new Map<string, THREE.Mesh>();
 const treasureMarker = new TreasureMarker(scene);
+const outpostMarkers = new OutpostMarkers(scene);
 
 /** The server tracks cannonball flight authoritatively but previously never
  * got a visual — players only saw the muzzle flash and, moments later, the
@@ -366,6 +368,7 @@ function clearWorldState() {
   for (const vis of renderedCannonballs.values()) scene.remove(vis.group);
   renderedCannonballs.clear();
   treasureMarker.setTarget(null);
+  outpostMarkers.clear();
   world = null;
 }
 
@@ -609,6 +612,7 @@ function animate() {
   }
   const treasureH = ocean.getHeightAt(treasureMarker.group.position.x, treasureMarker.group.position.z, elapsed);
   treasureMarker.update(dt, elapsed, treasureH);
+  outpostMarkers.sync(network.state?.outposts ?? [], elapsed);
 
   input.update();
 
@@ -697,6 +701,7 @@ function animate() {
         network.yourId,
         network.state?.crates ?? [],
         network.state?.salvage ?? [],
+        network.state?.outposts ?? [],
       );
     }
   }
@@ -704,13 +709,13 @@ function animate() {
   if (mine && myShip) {
     ocean.followTarget(mine.x, mine.z);
     hud.setHealth(mine.health, mine.maxHealth);
-    // Driven by the server's authoritative sanctuary test rather than the
+    // Driven by the server's authoritative dock test rather than the
     // client's own radius: World.isNearHomePort defaults to radius+15 (37
     // units) while the sanctuary is radius+45 (67), so a player could be
-    // safe and auto-banking with no way to open the shipyard. Safe, banked
-    // and "can shop" are deliberately one ring with one rule, and the ring
-    // only exists in one place now.
-    portBtn.classList.toggle('hidden', !network.state?.you.inSanctuary);
+    // safe and auto-banking with no way to open the shipyard. `canDock` is
+    // the server's single definition of "you can shop here" and now covers
+    // outposts you own as well as home port.
+    portBtn.classList.toggle('hidden', !network.state?.you.canDock);
 
     const behind = myShip.forwardDirection().multiplyScalar(-1);
     const desiredCamPos = myShip.group.position
@@ -740,5 +745,7 @@ function animate() {
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
+
+(window as any).__probe = { get: () => ({ scene, camera, renderer, THREE, ships: renderedShips, network }) };
 
 requestAnimationFrame(animate);

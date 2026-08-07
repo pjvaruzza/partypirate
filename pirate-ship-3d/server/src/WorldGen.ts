@@ -18,6 +18,24 @@ export interface CrateState {
 const ISLAND_CLEARANCE = 34;
 const HOME_PORT_KEEP_OUT = 90;
 
+/** How many islands become capturable outposts, and how far out they have to
+ * sit. The distance floor matters mechanically, not just thematically: an
+ * outpost's assault-trigger ring reaches `radius + 55` and the home sanctuary
+ * reaches 67, so an outpost any closer than ~160 would let a player standing
+ * in the safe ring poke a garrison awake and then duck back in. */
+const OUTPOST_COUNT = 5;
+const OUTPOST_MIN_HOME_DIST = 160;
+const OUTPOST_NAMES = [
+  'Gull Rock',
+  'Blackreef',
+  'Saltmarrow',
+  'Cinder Cay',
+  "Wrecker's Point",
+  'Bone Atoll',
+  'Gallows Shoal',
+  'Rum Bight',
+];
+
 /** Islands used to sit on `islandCount` evenly-spaced angular spokes at
  * `150 + rand*(worldRadius-150)`, which is uniform in *radius* and therefore
  * heavily biased toward the centre in *area* — and left the whole inner disc
@@ -25,7 +43,9 @@ const HOME_PORT_KEEP_OUT = 90;
  * the water's actual area, with golden-angle spokes and a rejection test so
  * they don't pile up or overlap. */
 export function generateIslands(islandCount: number, worldRadius: number): IslandInfo[] {
-  const islands: IslandInfo[] = [{ x: 0, z: 0, radius: 22, isHomePort: true }];
+  const islands: IslandInfo[] = [
+    { x: 0, z: 0, radius: 22, isHomePort: true, isOutpost: false, name: 'Home Port' },
+  ];
   const inner = HOME_PORT_KEEP_OUT;
   const outer = Math.max(inner + 1, worldRadius - 25);
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -44,11 +64,32 @@ export function generateIslands(islandCount: number, worldRadius: number): Islan
       const z = Math.sin(angle) * dist;
       if (dist < HOME_PORT_KEEP_OUT + radius) continue;
       if (islands.some((isl) => Math.hypot(isl.x - x, isl.z - z) < isl.radius + radius + ISLAND_CLEARANCE)) continue;
-      islands.push({ x, z, radius, isHomePort: false });
+      islands.push({ x, z, radius, isHomePort: false, isOutpost: false, name: null });
       placed = true;
     }
   }
+  designateOutposts(islands);
   return islands;
+}
+
+/** Promotes a spread of far-flung islands to capturable outposts. Picked by
+ * walking the distance-sorted list of eligible islands at an even stride
+ * rather than taking the N furthest: that guarantees one comparatively
+ * approachable outpost for a stock sloop AND one deep in tier-3 water worth a
+ * fully-kitted galleon, instead of a cluster all at the same difficulty. */
+function designateOutposts(islands: IslandInfo[]) {
+  const eligible = islands
+    .filter((isl) => !isl.isHomePort && Math.hypot(isl.x, isl.z) >= OUTPOST_MIN_HOME_DIST)
+    .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+  if (eligible.length === 0) return;
+
+  const count = Math.min(OUTPOST_COUNT, eligible.length, OUTPOST_NAMES.length);
+  const stride = eligible.length / count;
+  for (let i = 0; i < count; i++) {
+    const island = eligible[Math.min(eligible.length - 1, Math.floor(i * stride))];
+    island.isOutpost = true;
+    island.name = OUTPOST_NAMES[i];
+  }
 }
 
 export function spawnCrate(islands: IslandInfo[], worldRadius: number): CrateState {

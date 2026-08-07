@@ -1,4 +1,4 @@
-import type { ShipSnapshot } from '../shared/protocol';
+import type { OutpostInfo, ShipSnapshot } from '../shared/protocol';
 
 const SIZE = 150;
 const RADIUS = SIZE / 2;
@@ -68,6 +68,7 @@ export class Minimap {
     yourId: string,
     crates: MinimapPickup[] = [],
     salvage: MinimapPickup[] = [],
+    outposts: OutpostInfo[] = [],
   ) {
     const ctx = this.ctx;
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
@@ -95,6 +96,31 @@ export class Minimap {
       if (isl.isHomePort) {
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = '#fff3c4';
+        ctx.stroke();
+      }
+    }
+
+    // Capturable outposts. Drawn over the island discs above so ownership
+    // reads at a glance: green = yours (bank and refit here), red = another
+    // captain's, white = neutral and free to take. A dashed halo means a
+    // garrison is out and the island is being fought over right now.
+    for (const op of outposts) {
+      const p = toMinimap(op.x, op.z);
+      if (p.x < -30 || p.x > SIZE + 30 || p.y < -30 || p.y > SIZE + 30) continue;
+      const r = Math.max(3, op.radius * SCALE);
+      const color = op.yours ? '#3ddc84' : op.ownerName ? '#ff4d4d' : '#dfe7ec';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = op.yours ? 'rgba(61, 220, 132, 0.55)' : op.ownerName ? 'rgba(255, 77, 77, 0.5)' : 'rgba(223, 231, 236, 0.35)';
+      ctx.fill();
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      if (op.garrisonRemaining > 0) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 3 + pulse * 3.5, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 160, 60, ${0.75 * (1 - pulse * 0.6)})`;
+        ctx.lineWidth = 1.8;
         ctx.stroke();
       }
     }
@@ -143,8 +169,8 @@ export class Minimap {
       let color = '#7fd0ff';
       let r = 2.5;
       if (ship.isBot) {
-        color = ship.isBoss ? '#ff2d55' : ship.isRival ? '#ff8a2d' : '#e05050';
-        r = ship.isBoss || ship.isRival ? 4 : 2.5;
+        color = ship.isBoss ? '#ff2d55' : ship.isRival ? '#ff8a2d' : ship.isGarrison ? '#ffa63c' : '#e05050';
+        r = ship.isBoss || ship.isRival ? 4 : ship.isGarrison ? 3.2 : 2.5;
       }
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);

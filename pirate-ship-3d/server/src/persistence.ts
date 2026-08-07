@@ -20,7 +20,10 @@ export interface PersistedEconomy {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, '..', 'data', 'players.json');
+/** `ROGUE_TIDES_DATA_DIR` overrides the save location so standalone tests can
+ * run against a scratch directory instead of a live save file. */
+const DATA_DIR = process.env.ROGUE_TIDES_DATA_DIR ?? path.join(__dirname, '..', 'data');
+const DATA_FILE = path.join(DATA_DIR, 'players.json');
 
 function defaultEconomy(): PersistedEconomy {
   return {

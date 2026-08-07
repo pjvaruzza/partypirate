@@ -96,6 +96,13 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   identically against other players. Chain shot in particular is much more
   interesting in PvP than it ever was against bots: crippling a loaded
   captain's sails so they can't reach port is now a real play.
+  **CORRECTION (chain rebalance pass):** the numbers quoted above are stale,
+  and the enthusiasm in the previous sentence was the warning sign — "crippling
+  a loaded captain's sails so they can't reach port" was a *lock*, not a play.
+  Chain is now 0.6x damage / 60% speed for 2.5s with stacking rigging
+  resistance, and fire shot picked up a boost lockout so the chase has more
+  than one answer. See "Chain-shot rebalance" below for the full reasoning and
+  the measured numbers.
 - [x] **Ramming (S):** driving your hull into a bot at speed (≥3.5 units/s
   relative closing speed) damages both sides, scaled by that closing speed
   (capped at 45) — reuses the same damage-number/hit-stop/shake feedback as
@@ -123,6 +130,152 @@ tier. Sizes are rough gut-checks (S = an hour or two, M = a session, L = multi-s
   world-wide (not just to the player who lands the kill), unlike the
   quest-chain boss which only messages the hunter. No enrage phase — that
   stays the treasure-chain boss's signature.
+- [x] **Chain-shot rebalance + a second chase answer (S):** the UI pass that
+  finally made the four ammo types legible surfaced a real problem — chain was
+  close to *strictly correct* in PvP. The benchmark question is "an opponent is
+  200 units from port carrying 800 unbanked gold, what do I load?", stopping a
+  loaded runner is the highest-value play in the game, and chain was the only
+  shot that could do it. Worse, it was a hard **lock**: a 3.5s foul against a
+  ~0.9s chain reload meant one captain could pin another at 35% speed forever,
+  with zero counterplay. Four options were collapsing back to one, which is the
+  original "the options don't mean anything" complaint relocated.
+  Fixed in three parts:
+  1. **Rigging resistance (`chainResist`).** Every foul that lands leaves the
+     target's crew better at cutting wreckage away: +0.5 per hit, decaying
+     0.1/sec (10s from saturated back to fresh). Resistance both *shortens* and
+     *weakens* the next foul.
+  2. **A softer, shorter foul.** 60% of top speed for 2.5s (was 35% for 3.5s),
+     with damage raised 0.5x -> 0.6x to pay for it. Chain still has the worst
+     sustained DPS of the four (0.6/1.3 = 0.4615x round shot), so it stays a
+     burst tool you swap *to* and then away from.
+  3. **Fire shot became the other chase answer.** A runner's real escape tool
+     is the powder boost; burning now locks it out (you cannot run powder to
+     the sails with the deck alight). Damage profile unchanged. An active
+     boost is *not* cancelled — fire denies the escape you haven't taken, it
+     doesn't yank one out from under you. Surfaced with a one-shot banner on
+     ignition plus `EconomySnapshot.boostLocked`, because an invisible effect
+     may as well not exist (PLAYTEST_FEEDBACK #2).
+
+  So the 200-units-from-port call now has four real answers: **chain** if
+  you're just outside cannon range and need one burst of closing; **fire** if
+  they still have boost charges; **grape** if you're already alongside (1.6x
+  close); **round** if you can hold contact the whole way and just want DPS.
+
+  **A real bug the test caught, not the compiler:** the first implementation
+  re-applied the foul with a single "replace if the new duration is longer"
+  test. The second foul of a barrage lands with a duration that ties the
+  remaining time to within one float ULP — and on the wrong side of that tie it
+  replaced a 0.60 slow with a 0.76 one. Shooting someone with chain shot could
+  make them *faster*, decided by floating-point noise. Now the two dimensions
+  are taken independently (`max` on duration, `min` on multiplier), which
+  cannot express that outcome at all.
+
+  Verified with a standalone `tsx` script importing `GameRoom` directly (86
+  assertions, all exact or within 1e-9). Highlights: fresh foul is exactly
+  2.5s / 0.6x / resist 0.5; a fouled stock sloop (topSpeed 9) clamps to
+  exactly 5.4 (was 3.15); the 2nd and 3rd fouls of a barrage provably do not
+  extend the leash (timer stays 1.5 then 0.5); the 4th, 3 seconds in, buys
+  0.25s at a 0.96x multiplier — a 4% slow. The headline number: **a 12-second
+  sustained chain barrage at a 0.9s reload cadence leaves the runner fouled
+  for 4.70s of 12 and averages a 0.9101x speed multiplier** — a 9% average
+  slow, against the old build's permanent 65%. Fire's DoT total re-asserted
+  at exactly 70 on a 100-damage broadside (the old float-drift regression
+  test), and the boost lockout asserted on both sides (charge stays 3 while
+  burning, drops to 2 the tick the fire is out).
+- [x] **Capturable outposts (L):** the owner's own suggestion from playtest
+  feedback ("home base is far away... Maybe taking over another persons
+  base?"), taken seriously because one mechanic addresses four complaints:
+  traversal pain, islands being purposeless scenery, no territory stakes, and
+  no reason to log in tomorrow.
+
+  **What it is.** Five of the eighteen islands (`isOutpost` in `IslandInfo`,
+  chosen in `WorldGen.designateOutposts` by walking the distance-sorted list at
+  an even stride, so there's always one approachable-on-a-sloop outpost and one
+  deep in tier-3 water) are named, capturable forward bases: Gull Rock,
+  Blackreef, Saltmarrow, Cinder Cay, Wrecker's Point.
+
+  **What owning one gives you.** A second place to bank your hold and open the
+  shipyard (`EconomySnapshot.canDock` is now the single server-side definition
+  of "you can shop here" and the only thing the PORT button reads), plus a
+  tithe that accrues on wall-clock server time while you're logged out —
+  `4 + 3*tier` gold/minute, capped at 600, collected by docking.
+
+  **The trade-off, in one sentence: an outpost saves you the sail home, but
+  you bank and refit there with no sanctuary — anyone can shoot you the whole
+  time.** It is a convenience bought with exposure, not a second safe harbour.
+  Home port keeps its 67-unit two-way damage-immunity ring; outposts get a
+  ~40-unit dock ring that banks and shops and protects nothing.
+
+  **How you take one — a fight, not a timer.** Sail inside `radius + 55` of an
+  outpost you don't own and its garrison sorties: real bot ships, tier-scaled
+  to the island's distance from home. Neutral = 2 ships at island tier;
+  player-held = 3 ships at tier+1 (the fortification you get for holding it).
+  Sink every one and the outpost flips **the instant the last hull goes
+  under**, to whoever landed that specific kill — which is deliberately a
+  kill-steal, so two captains racing the same garrison are competing for one
+  shot and can shoot each other over it. Leave the ring and the garrison
+  stands down after 45 unattended seconds with a 30s retry cooldown, so it
+  cannot be AFK'd. A freshly-respawned, damage-immune captain can't pull a
+  garrison it can't be hurt by. Post-capture there's a 300s grace before the
+  base can be assaulted again, so taking one actually buys time to use it.
+
+  **The safety net is intact, deliberately.** Home port is permanently
+  neutral, safe and un-ownable — there is no code path that can flag it
+  `isOutpost`. With a 2-3 player friend group, an outpost you can lose has to
+  cost *convenience*, never *access*: whoever's losing can always sail home,
+  bank and refit in total safety. Nothing is stolen on capture either — the
+  loser forfeits the outpost and the tithe standing on it, never banked gold,
+  never their ship. That's the line between a rivalry and a rage-quit.
+
+  **Solo play works.** Neutral outposts have bot garrisons, so there is always
+  something worth taking whether or not anyone else is online — which is the
+  common case at 2-3 concurrency.
+
+  **Persistence.** New `server/src/worldPersistence.ts` (`world.json`, same
+  trust-based debounced-write model as `players.json`) stores **the island
+  layout as well as ownership**. That's load-bearing, not incidental: islands
+  are randomly generated at boot, so without persisting the layout a restart
+  would shuffle the map and ownership keyed to an island index would land on a
+  different rock. Persisting it is what makes "the world I left is the world I
+  come back to" literally true. Ownership saves the instant it changes; the
+  accruing tithe flushes on a 60s timer so a restart can't silently eat it.
+  `ROGUE_TIDES_DATA_DIR` now overrides the save location for both files so
+  tests run hermetically.
+
+  **Verified** in the same standalone `tsx` script (see chain entry above),
+  exact values: 5 outposts, none of them home port, every one >= 160 units out
+  and with an assault ring that provably cannot reach into the 67-unit home
+  sanctuary; capture transfers ownership only on a *player*-attributed last
+  kill (an unattributed kill leaves it neutral); a captured outpost banks a
+  planted 800-gold hold to exactly 800 banked while reporting
+  `inSanctuary: false` and `isProtected: false`; tithe after 60s at tier 2 is
+  exactly 10, and a capped 600 pays out as exactly 600; the 300s grace blocks
+  a counter-assault and the player-held garrison is exactly 3 ships at exactly
+  tier+1; a contested capture goes to the kill-stealer and revokes the
+  previous owner's dock access while leaving their **home** dock access
+  `true`; an abandoned assault stands the garrison down at 45s with the
+  outpost still neutral; and a second `GameRoom` constructed after a flush
+  restores 19 islands, island[5].x to the bit, and outpost 0 as `Rival` on
+  `Blackreef`.
+
+  **Deferred, deliberately:** outposts do not act as respawn points (respawn
+  stays at home port, keeping the safety net a single rule), and there is no
+  shipyard *stock* difference between home and an outpost. Both are additive
+  and neither is needed for the loop to work.
+
+  **Handoffs.** `src/game/OutpostMarkers.ts` is placeholder-grade on purpose —
+  an owner-coloured banner on a pole and a ring at the dock radius, nothing
+  more. **art-director:** an outpost should read as a *place* (fortified
+  harbour, jetty, stockade, real heraldry that changes on capture), the
+  garrison ships want a silhouette that isn't a recoloured bot, and the
+  capture moment deserves a beat — flag drop, cannon salute.
+  **mobile-ux:** `EconomySnapshot` now carries `atOwnedOutpost`,
+  `outpostsOwned` and `boostLocked`, and `StateMessage.outposts` carries
+  per-viewer ownership/tithe/garrison state — none of it has a HUD affordance
+  yet. The two that matter most on a phone: a "your outposts" readout showing
+  where the tithe is piling up, and greying the boost button while
+  `boostLocked`. **sound-design:** the sortie, the capture, and the fire-shot
+  boost lockout are all silent.
 - **Boarding (L):** at low enemy health, option to board instead of sink —
   higher risk/reward loot, maybe a quick-time or mini-minigame.
 

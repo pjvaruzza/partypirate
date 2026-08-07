@@ -10,8 +10,11 @@ export interface InputState {
   ammoType?: AmmoType;
 }
 
-/** Round shot is the free default; chain and grape are trade-offs (lower
- * base damage for a situational effect), not strictly-better upgrades. */
+/** Round shot is the free default; the other three are trade-offs (lower base
+ * damage for a situational effect), not strictly-better upgrades. Chain in
+ * particular cannot be spammed to lock a runner down: every foul builds
+ * rigging resistance on the target, so it is a one-shot burst of closing
+ * distance rather than a permanent leash. See CHAIN_* in GameRoom.ts. */
 export type AmmoType = 'round' | 'chain' | 'grape' | 'fire';
 export const AMMO_TYPE_ORDER: AmmoType[] = ['round', 'chain', 'grape', 'fire'];
 
@@ -78,6 +81,39 @@ export interface IslandInfo {
   z: number;
   radius: number;
   isHomePort: boolean;
+  /** A capturable forward base — see OutpostInfo. Home port is never one. */
+  isOutpost: boolean;
+  /** Only outposts and the home port are named; plain scenery islands are null. */
+  name: string | null;
+}
+
+/** A capturable forward base. Owning one gives you a second place to bank
+ * your hold and open the shipyard, plus a tithe that accrues while you're
+ * away — but an outpost is NOT a sanctuary: no damage immunity, in either
+ * direction. That is the whole trade-off. Home port stays permanently
+ * neutral, safe and available to everyone, so losing an outpost costs
+ * convenience and never access. Per-player: `yours`/`tithe` are filled in
+ * from the receiving client's point of view. */
+export interface OutpostInfo {
+  /** Index into the island list from the welcome message. */
+  islandIndex: number;
+  name: string;
+  x: number;
+  z: number;
+  radius: number;
+  /** Captain name of the current owner, or null while neutral. */
+  ownerName: string | null;
+  yours: boolean;
+  /** How many garrison ships are still afloat; 0 means nobody is assaulting
+   * it right now. Sink the last one and the outpost changes hands. */
+  garrisonRemaining: number;
+  /** Seconds until this outpost can be assaulted again (post-capture grace,
+   * so a base can't be ping-ponged the moment it's taken). */
+  lockedFor: number;
+  /** Uncollected tithe waiting at this outpost — only non-zero for its owner.
+   * Collected into the hold (and immediately banked) by docking. */
+  tithe: number;
+  tithePerMinute: number;
 }
 
 export interface CrateInfo {
@@ -110,6 +146,9 @@ export interface ShipSnapshot {
   /** A named rival captain — an occasional, tougher/faster ambient encounter
    * distinct from the treasure-hunt boss chain. Always false for players. */
   isRival: boolean;
+  /** An outpost garrison ship — spawned when someone starts an assault and
+   * despawned when they give up. Always false for players. */
+  isGarrison: boolean;
   shipClass: ShipClass;
   x: number;
   z: number;
@@ -153,6 +192,20 @@ export interface EconomySnapshot {
   /** Inside the home-port sanctuary: hold banks automatically and no damage
    * can be dealt or taken, by anyone, in either direction. */
   inSanctuary: boolean;
+  /** Docked at an outpost you own. Banks the hold and opens the shipyard just
+   * like home port does — but confers NO damage immunity, so you are refitting
+   * with your guard down. */
+  atOwnedOutpost: boolean;
+  /** `inSanctuary || atOwnedOutpost` — the single flag the PORT button reads,
+   * so "where can I shop" only ever has one definition. */
+  canDock: boolean;
+  /** How many outposts this captain currently holds. */
+  outpostsOwned: number;
+  /** Fire shot on the hull means no powder can be run to the sails: the boost
+   * is locked out until the flames are out. The other half of fire's identity
+   * besides damage-over-time, and the reason it is a chase answer that isn't
+   * chain shot. */
+  boostLocked: boolean;
   /** Seconds of post-respawn immunity left. Ends immediately if you fire, so
    * it can't be used as a shield to shoot from. */
   spawnProtection: number;
@@ -193,6 +246,8 @@ export interface StateMessage {
   cannonballs: CannonballSnapshot[];
   crates: CrateInfo[];
   salvage: SalvageInfo[];
+  /** Built per-recipient (the `yours`/`tithe` fields are viewer-relative). */
+  outposts: OutpostInfo[];
   you: EconomySnapshot;
 }
 

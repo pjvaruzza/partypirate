@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { GameRoom } from './GameRoom';
 import { flushSync, loadPlayer } from './persistence';
+import { flushWorldSync } from './worldPersistence';
 import type {
   ClientMessage,
   ServerMessage,
@@ -90,6 +91,7 @@ function broadcast() {
     isBot: s.isBot,
     isBoss: s.isBot ? s.isBoss : false,
     isRival: s.isBot ? s.isRival : false,
+    isGarrison: s.isBot ? s.garrisonOutpost !== null : false,
     shipClass: s.isBot ? 'sloop' : s.economy.shipClass,
     x: s.body.x,
     z: s.body.z,
@@ -130,6 +132,9 @@ function broadcast() {
       cannonballs: cannonballsSnapshot,
       crates: cratesSnapshot,
       salvage: salvageSnapshot,
+      // Viewer-relative (which outposts are *yours*, what tithe is waiting),
+      // so unlike the other arrays this one is built per recipient.
+      outposts: room.buildOutpostSnapshot(ship),
       you,
     });
 
@@ -142,6 +147,7 @@ function broadcast() {
 
 function shutdown() {
   flushSync();
+  flushWorldSync();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
