@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { woodGrainTexture, sailClothTexture } from './Textures';
+import { woodGrainTexture, sailAtlasTexture, EMBLEM_COUNT } from './Textures';
+import { GeoBuilder } from './GeoBuilder';
 
 export interface ShipStats {
   sailLevel: number; // affects top speed & acceleration
@@ -79,6 +80,47 @@ const DECK_CAMBER = 0.07;
  * already applied everywhere. */
 export type HullClass = 0 | 1 | 2;
 
+/** Everything painted on a hull. Previously a ship was one flat `hullColor`
+ * plus a barely-visible boot-top, which is why a dozen hulls read as one
+ * silhouette in brown: nothing on the model carried a second value, let alone
+ * a second hue. */
+export interface ShipLivery {
+  /** Topside planking. */
+  plank: number;
+  /** Antifouling below the waterline. */
+  bottom: number;
+  /** Boot-top stripe straddling the waterline. */
+  boot: number;
+  /** Rubbing strake / wale — the dark band at mid-freeboard. */
+  wale: number;
+  /** The painted topsides above the deck line. Broad, so it wants to be a
+   * quiet colour; the accent does the shouting. */
+  bulwark: number;
+  /** The sheer stripe, and with it the pennant, gunport lids, taffrail and
+   * stern board. The ship's identity colour: it traces the sheer curve, which
+   * is the one line on a hull the eye follows, so it reads even when the ship
+   * is 40px wide. Deliberately confined to a ~0.1-unit band — the first cut
+   * of this painted the whole bulwark and every hull turned into a bathtub
+   * with a fluorescent rim. */
+  accent: number;
+  deck: number;
+  sail: number;
+  /** Index into the sail heraldry atlas. */
+  emblem: number;
+}
+
+export const DEFAULT_LIVERY: ShipLivery = {
+  plank: 0x6b4a2c,
+  bottom: 0x6d3a2c,
+  boot: 0x1b140f,
+  wale: 0x33200f,
+  bulwark: 0x5c3f26,
+  accent: 0xc9a227,
+  deck: 0x9a7448,
+  sail: 0xd8cdb4,
+  emblem: 0,
+};
+
 function beamFullnessMult(hullClass: HullClass): number {
   return hullClass === 0 ? 1 : hullClass === 1 ? 1.08 : 1.2;
 }
@@ -152,30 +194,143 @@ function deckV(t: number, hullClass: HullClass): number {
   return Math.min(1, Math.max(0, (deckProfile(t, hullClass) - keelY) / (sheerY - keelY)));
 }
 
+/** Fraction of the way from keel to rail at which the hull crosses the
+ * waterline. Varies a lot along the length (0.25 at the stem, 0.46 amidships,
+ * 0.31 at the transom) because of the rocker in the keel and the sheer — which
+ * is exactly why the boot-top stripe cannot be a straight band. */
+function waterV(t: number, hullClass: HullClass): number {
+  const keelY = keelProfile(t);
+  const sheerY = sheerProfile(t, hullClass);
+  return Math.min(1, Math.max(0, -keelY / (sheerY - keelY)));
+}
+
+// --- girth sampling -------------------------------------------------------
+//
+// The hull's cross-section used to be sampled at 16 EVENLY SPACED points from
+// rail to rail, and its paint was written into those vertices. That is why the
+// boot-top has never been visible: even spacing puts a sample every 0.17 world
+// units of hull depth, the boot band is 0.09 tall, so it landed inside a
+// single vertex and Gouraud-smeared into a 0.34-unit brown gradient.
+//
+// The fix is to keep the SAME vertex count and just put the samples where the
+// paint is. Each station places its 11 per-side samples on the specific
+// features it has to render crisply: a tight pair straddling the waterline for
+// the boot-top, a tight pair for the wale, and one just under the deck line so
+// the painted bulwark band starts exactly at the deck and not somewhere near
+// it. Because waterV/deckV are functions of `t`, the bands automatically
+// follow the sheer and the rocker the way real paint does.
+const GIRTH_HALF = 13; // samples per side beyond the keel
+const GIRTH = GIRTH_HALF * 2;
+/** Half-height of the boot-top band, in v (keel→rail) units. */
+const BOOT_HALF_V = 0.03;
+
+/** The 14 ascending v values for one side of a station, keel (0) → rail (1). */
+function stationVs(t: number, hullClass: HullClass, out: number[]): void {
+  const w = waterV(t, hullClass);
+  const d = Math.max(w + 0.12, deckV(t, hullClass));
+  const mix = (a: number, b: number, f: number) => a + (b - a) * f;
+  out[0] = 0;
+  out[1] = w * 0.6;
+  out[2] = w - BOOT_HALF_V;
+  out[3] = w + BOOT_HALF_V;
+  out[4] = w + BOOT_HALF_V + 0.045;
+  out[5] = mix(w, d, 0.5);
+  out[6] = mix(w, d, 0.63);
+  out[7] = mix(w, d, 0.73);
+  out[8] = d - 0.022;
+  out[9] = d + 0.012;
+  // Sheer stripe: a tight quadruple so the paint has hard edges top and bottom
+  // instead of Gouraud-smearing into a gradient the width of the whole bulwark.
+  out[10] = 1 - 0.115;
+  out[11] = 1 - 0.095;
+  out[12] = 1 - 0.022;
+  out[13] = 1;
+  // Guarantee strict monotonicity even at the extreme stations, where w and d
+  // crowd together and a naive table would fold the section inside out.
+  for (let i = 1; i <= GIRTH_HALF; i++) out[i] = Math.min(1, Math.max(out[i], out[i - 1] + 0.003));
+}
+
+/** Palette slot for each girth index, keel → rail. */
+type Band =
+  | 'bottomDeep'
+  | 'bottom'
+  | 'boot'
+  | 'plankWet'
+  | 'plank'
+  | 'wale'
+  | 'plankHigh'
+  | 'bulwark'
+  | 'accent'
+  | 'caprail';
+const BAND_BY_INDEX: Band[] = [
+  'bottomDeep', // 0  keel
+  'bottom', // 1
+  'boot', // 2  waterline −
+  'boot', // 3  waterline +
+  'plankWet', // 4
+  'plank', // 5
+  'wale', // 6
+  'wale', // 7
+  'plankHigh', // 8  just under the deck line
+  'bulwark', // 9  painted topsides begin
+  'bulwark', // 10
+  'accent', // 11 sheer stripe −
+  'accent', // 12 sheer stripe +
+  'caprail', // 13 rail
+];
+
+/** Smooth per-hull grime so a fleet isn't a dozen identical paint jobs. Two
+ * octaves of value noise along the hull's length, seeded per ship. */
+function weathering(t: number, seed: number): number {
+  const h = (i: number) => {
+    const s = Math.sin((i + seed * 0.618) * 127.1) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  const oct = (freq: number, off: number) => {
+    const x = t * freq + off;
+    const i = Math.floor(x);
+    const f = x - i;
+    const u = f * f * (3 - 2 * f);
+    return h(i + off) * (1 - u) + h(i + 1 + off) * u;
+  };
+  return 0.86 + 0.22 * (oct(4.5, 0) * 0.62 + oct(11, 31) * 0.38);
+}
+
 /** A lofted hull: cross-section "stations" swept from stern to bow, each a
  * rounded-bilge curve running keel → deck edge. Replaces a tapered
- * BoxGeometry, which read as a wedge no matter how well it was shaded. */
-function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.BufferGeometry {
+ * BoxGeometry, which read as a wedge no matter how well it was shaded.
+ *
+ * The material is now WHITE with `vertexColors`, i.e. the paint scheme lives
+ * entirely in the mesh. That's what buys the boot-top, the wale and the
+ * per-ship accent band for zero extra draw calls and zero extra textures. */
+function buildLoftedHullGeometry(
+  scale: number,
+  hullClass: HullClass,
+  livery: ShipLivery,
+  seed: number,
+): THREE.BufferGeometry {
   const STATIONS = 32;
-  const GIRTH = 16;
   const positions: number[] = [];
   const uvs: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
 
-  // Boot-top: a dark antifouling bottom below the waterline and a narrow
-  // near-black band straddling it. Without this the hull is one flat wood
-  // tone from keel to rail, so nothing on the model itself says where the
-  // water is meant to meet it — the eye has no waterline to read and defaults
-  // to "this thing is stuck in the surface" rather than "floating on it".
-  const bootColor = (yLocal: number): [number, number, number] => {
-    const y = yLocal / scale; // back to hull-form units, where y=0 is the waterline
-    const below = 1 - smooth(y, -0.05, 0.14); // 1 fully under, 0 fully above
-    const band = Math.max(0, 1 - Math.abs(y - 0.02) / 0.09);
-    const m = 1 - below * 0.5 - band * 0.28;
-    // Antifouling reads slightly red-brown rather than just darker wood.
-    return [m * 1.05, m * 0.9, m * 0.86];
+  const pal: Record<Band, THREE.Color> = {
+    bottomDeep: new THREE.Color(livery.bottom).multiplyScalar(0.72),
+    bottom: new THREE.Color(livery.bottom),
+    boot: new THREE.Color(livery.boot),
+    plankWet: new THREE.Color(livery.plank).multiplyScalar(0.8),
+    plank: new THREE.Color(livery.plank),
+    wale: new THREE.Color(livery.wale),
+    plankHigh: new THREE.Color(livery.plank).multiplyScalar(1.1),
+    bulwark: new THREE.Color(livery.bulwark),
+    accent: new THREE.Color(livery.accent),
+    // A dark cap above the bright stripe. Capping it is what stops the stripe
+    // bleeding into the sky along the sheer and reading as a glow.
+    caprail: new THREE.Color(livery.wale).multiplyScalar(0.9),
   };
+
+  const vs: number[] = new Array(GIRTH_HALF + 1).fill(0);
 
   for (let i = 0; i <= STATIONS; i++) {
     const t = i / STATIONS;
@@ -183,16 +338,23 @@ function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.Buf
     const beam = beamProfile(t, hullClass) * HULL_MAX_BEAM * scale;
     const keelY = keelProfile(t) * scale;
     const sheerY = sheerProfile(t, hullClass) * scale;
+    stationVs(t, hullClass, vs);
+    // Grime is strongest low on the hull (splash and weed) and near the ends.
+    const w = weathering(t, seed);
 
     for (let j = 0; j <= GIRTH; j++) {
-      const g = j / GIRTH;
-      const s = g * 2 - 1; // -1 port … +1 starboard
-      const v = Math.abs(s); // 0 at the keel, 1 at the rail
-      const x = Math.sign(s) * beam * sectionFullness(v);
+      const side = j < GIRTH_HALF ? -1 : 1;
+      const k = j < GIRTH_HALF ? GIRTH_HALF - j : j - GIRTH_HALF;
+      const v = vs[k];
+      const x = side * beam * sectionFullness(v);
       const y = keelY + (sheerY - keelY) * v;
       positions.push(x, y, z);
-      uvs.push(g, t);
-      colors.push(...bootColor(y));
+      uvs.push(j / GIRTH, t);
+      const c = pal[BAND_BY_INDEX[k]];
+      // Painted surfaces weather less than bare planking, so the sheer stripe
+      // stays legible on a filthy hull instead of going the same grey.
+      const wm = k >= 11 ? 1 - (1 - w) * 0.3 : w;
+      colors.push(c.r * wm, c.g * wm, c.b * wm);
     }
   }
 
@@ -206,14 +368,10 @@ function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.Buf
 
   // Transom: fan the open stern section closed from its centroid.
   //
-  // BUG FIX: the fan used to cover only the U-shaped station ring (port rail →
-  // keel → starboard rail) and stopped at the two spokes running from the
-  // centroid out to each rail. Everything above those spokes — a wedge right
-  // on the ship's centreline — was simply not there, and with the deck now
-  // recessed inside a bulwark it was no longer covered up: from the chase
-  // camera, dead astern, you could see the open sea straight through the back
-  // of the ship. Fanning the rail-to-rail closing edge as well makes the
-  // transom a genuinely closed panel.
+  // BUG FIX (kept): the fan used to cover only the U-shaped station ring and
+  // stopped at the two spokes running out to each rail, leaving an open wedge
+  // right on the centreline that you could see the sea through from dead
+  // astern. Fanning the rail-to-rail closing edge as well closes it.
   const sternKeel = keelProfile(0) * scale;
   const sternSheer = sheerProfile(0, hullClass) * scale;
   const sternZ = -HULL_HALF_LENGTH * scale;
@@ -221,10 +379,8 @@ function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.Buf
   const centroidY = (sternKeel + sternSheer) * 0.5;
   positions.push(0, centroidY, sternZ);
   uvs.push(0.5, 0);
-  colors.push(...bootColor(centroidY));
-  for (let j = 0; j < GIRTH; j++) {
-    indices.push(centroidIndex, j + 1, j);
-  }
+  colors.push(pal.plank.r * 0.7, pal.plank.g * 0.7, pal.plank.b * 0.7);
+  for (let j = 0; j < GIRTH; j++) indices.push(centroidIndex, j + 1, j);
   indices.push(centroidIndex, 0, GIRTH);
 
   // Same closure at the stem. beamProfile(1) floors at 0.03 rather than 0, so
@@ -234,11 +390,9 @@ function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.Buf
   const bowY = (keelProfile(1) + sheerProfile(1, hullClass)) * 0.5 * scale;
   positions.push(0, bowY, HULL_HALF_LENGTH * scale);
   uvs.push(0.5, 1);
-  colors.push(...bootColor(bowY));
+  colors.push(pal.plank.r * 0.8, pal.plank.g * 0.8, pal.plank.b * 0.8);
   const bowRing = STATIONS * (GIRTH + 1);
-  for (let j = 0; j < GIRTH; j++) {
-    indices.push(bowIndex, bowRing + j, bowRing + j + 1);
-  }
+  for (let j = 0; j < GIRTH; j++) indices.push(bowIndex, bowRing + j, bowRing + j + 1);
   indices.push(bowIndex, bowRing + GIRTH, bowRing);
 
   const geo = new THREE.BufferGeometry();
@@ -250,17 +404,11 @@ function buildLoftedHullGeometry(scale: number, hullClass: HullClass): THREE.Buf
   return geo;
 }
 
-/** Smoothstep, used by the boot-top ramp. */
-function smooth(x: number, a: number, b: number): number {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-}
-
 /** The deck surface closing the top of the hull, cambered so it crowns along
  * the centreline instead of reading as a flat lid. */
 function buildDeckGeometry(scale: number, hullClass: HullClass): THREE.BufferGeometry {
-  const STATIONS = 32;
-  const SPAN = 10;
+  const STATIONS = 24;
+  const SPAN = 8;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -268,17 +416,16 @@ function buildDeckGeometry(scale: number, hullClass: HullClass): THREE.BufferGeo
   for (let i = 0; i <= STATIONS; i++) {
     const t = i / STATIONS;
     const z = (t - 0.5) * 2 * HULL_HALF_LENGTH * scale;
-    // The deck now sits BULWARK_HEIGHT below the rail, and the hull's
-    // topsides flare outward, so the deck is narrower than the rail line —
-    // build it to the hull's actual half-beam at deck level (same
-    // `beam * v^0.5` law the loft uses) or it would poke through the sides.
+    // The deck sits BULWARK_HEIGHT below the rail and the topsides flare
+    // outward, so the deck is narrower than the rail line — build it to the
+    // hull's actual half-beam at deck level or it pokes through the sides.
     const beam = beamProfile(t, hullClass) * HULL_MAX_BEAM * scale * sectionFullness(deckV(t, hullClass));
     const deckY = deckProfile(t, hullClass) * scale;
     for (let j = 0; j <= SPAN; j++) {
       const u = j / SPAN;
       const s = u * 2 - 1;
       positions.push(s * beam, deckY + DECK_CAMBER * scale * (1 - s * s), z);
-      uvs.push(u, t * 3);
+      uvs.push(u * 1.4, t * 4);
     }
   }
   for (let i = 0; i < STATIONS; i++) {
@@ -302,12 +449,6 @@ function buildDeckGeometry(scale: number, hullClass: HullClass): THREE.BufferGeo
  * outboard, widening into a bow wave forward.
  *
  * This is the single strongest "floating" cue and the game had none of it.
- * Verified with a magenta-painted ocean that the sea *was* already clipping
- * the hull at the correct height — the hull just terminated against the water
- * with a hard, dry edge and no contact whatsoever, so nothing told the eye
- * whether the water was in front of the hull or behind it, and it read as a
- * boat-shaped object hovering over a painted sea.
- *
  * One extra transparent draw call per ship over a very small screen area;
  * depthWrite is off so it can't punch a hole in anything behind it. */
 function buildFoamCollar(scale: number, hullClass: HullClass): THREE.Mesh {
@@ -316,14 +457,8 @@ function buildFoamCollar(scale: number, hullClass: HullClass): THREE.Mesh {
   const colors: number[] = [];
   const indices: number[] = [];
 
-  /** Half-beam where the hull's own surface crosses y = 0, i.e. the waterline
-   * outline the foam has to trace. */
-  const waterlineHalfBeam = (t: number) => {
-    const keelY = keelProfile(t);
-    const sheerY = sheerProfile(t, hullClass);
-    const v0 = Math.min(1, Math.max(0, -keelY / (sheerY - keelY)));
-    return beamProfile(t, hullClass) * HULL_MAX_BEAM * scale * sectionFullness(v0);
-  };
+  const waterlineHalfBeam = (t: number) =>
+    beamProfile(t, hullClass) * HULL_MAX_BEAM * scale * sectionFullness(waterV(t, hullClass));
 
   // Closed loop around the waterline: starboard stern→bow, then port bow→stern.
   // A closed ring rather than two parallel side strips specifically so the foam
@@ -349,13 +484,10 @@ function buildFoamCollar(scale: number, hullClass: HullClass): THREE.Mesh {
     const len = Math.hypot(nx, nz) || 1;
     nx /= len;
     nz /= len;
-    // Point the normal away from the hull's centre.
     if (nx * loop[k].x + nz * loop[k].z < 0) {
       nx = -nx;
       nz = -nz;
     }
-    // A little wider forward (bow wave) and right astern (wake), narrower
-    // along the flat of the side.
     const t = loop[k].t;
     const spread =
       (0.22 + 0.34 * Math.pow(Math.max(0, t - 0.5) / 0.5, 1.6) + 0.3 * Math.max(0, 1 - t / 0.2)) * scale;
@@ -386,18 +518,9 @@ function buildFoamCollar(scale: number, hullClass: HullClass): THREE.Mesh {
       opacity: 0.85,
       depthWrite: false,
       side: THREE.DoubleSide,
-      // Three.js renders transparent + DoubleSide materials as TWO draw calls
-      // per frame by default (back faces, then front faces) to fix
-      // self-overlap sorting — see Material.forceSinglePass's own doc comment,
-      // which explicitly calls out flat double-sided geometry as the case
-      // where this buys nothing but doubles draw calls. That's exactly this
-      // mesh: a thin flat ring with depthWrite already off, so there's no
-      // self-sorting artifact for the two-pass split to prevent. Measured via
-      // renderer.getContext().drawElements: forceSinglePass:false submitted
-      // the same 148-triangle index buffer twice (296 tris / 2 draws per
-      // ship); forceSinglePass:true submits it once, confirmed pixel-identical
-      // at chase-cam, broadside, and dead-astern (the closed-ring view this
-      // mesh cares most about).
+      // Three renders transparent + DoubleSide as TWO draw calls by default to
+      // fix self-overlap sorting; this is a thin flat ring with depthWrite off,
+      // so there is no self-sorting artifact for the split to prevent.
       forceSinglePass: true,
     }),
   );
@@ -406,330 +529,564 @@ function buildFoamCollar(scale: number, hullClass: HullClass): THREE.Mesh {
   return mesh;
 }
 
-/** Gunwale rail swept along the actual sheer curve — straight box rails left
- * visible gaps once the hull stopped being a rectangular prism. */
-function buildSheerRail(side: 1 | -1, scale: number, hullClass: HullClass): THREE.Mesh {
-  const points: THREE.Vector3[] = [];
-  for (let i = 0; i <= 24; i++) {
-    const t = i / 24;
-    const beam = beamProfile(t, hullClass) * HULL_MAX_BEAM * scale;
-    points.push(
-      new THREE.Vector3(
-        side * beam * 0.985,
-        sheerProfile(t, hullClass) * scale + 0.055 * scale,
-        (t - 0.5) * 2 * HULL_HALF_LENGTH * scale,
-      ),
-    );
+// --- sails ----------------------------------------------------------------
+
+/** Rewrites a geometry's uvs into a sub-rectangle of the sail atlas. */
+function remapUV(geo: THREE.BufferGeometry, u0: number, u1: number, v0: number, v1: number) {
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, u0 + (u1 - u0) * uv.getX(i), v0 + (v1 - v0) * uv.getY(i));
   }
-  const curve = new THREE.CatmullRomCurve3(points);
-  const geo = new THREE.TubeGeometry(curve, 40, 0.055 * scale, 6, false);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x40291a, roughness: 0.7 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  return mesh;
+  uv.needsUpdate = true;
 }
 
-/** A sail with an actual belly in it — a flat plane reads as cardboard. */
-function buildBilloweSail(
-  width: number,
-  height: number,
-  bulge: number,
-  sailColor: number,
-): THREE.Mesh {
-  const geo = new THREE.PlaneGeometry(width, height, 12, 12);
+/** A square sail with an actual belly in it — a flat plane reads as cardboard.
+ * The belly is asymmetric (fullest at a third of the way up, and the leech
+ * curls further than the luff) because a symmetric pillow reads as a balloon. */
+function billowedSailGeometry(width: number, height: number, bulge: number, segs = 10): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(width, height, segs, segs);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const u = pos.getX(i) / width + 0.5;
     const v = pos.getY(i) / height + 0.5;
-    pos.setZ(i, Math.sin(u * Math.PI) * Math.sin(v * Math.PI) * bulge);
+    const across = Math.sin(u * Math.PI);
+    // Draft aft: fullest at ~35% of the hoist, tapering to the head where the
+    // yard holds it flat and to the foot where the sheets pull it out.
+    const up = Math.pow(Math.sin(v * Math.PI), 0.8) * (0.72 + 0.5 * Math.exp(-Math.pow((v - 0.38) / 0.34, 2)));
+    pos.setZ(i, across * up * bulge);
+    // Scallop the foot between the clews, the way loose-footed canvas hangs.
+    if (v < 0.06) pos.setY(i, pos.getY(i) + Math.sin(u * Math.PI) * height * 0.055);
   }
   pos.needsUpdate = true;
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({
-    color: sailColor,
-    side: THREE.DoubleSide,
-    // Fully rough, so the sail takes shading from the billow instead of
-    // clipping to a flat blown-out white under the sun + ACES tonemap.
-    roughness: 1,
-    metalness: 0,
-    map: sailClothTexture(),
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  return mesh;
+  return geo;
 }
 
-/** A cylinder stretched and oriented between two arbitrary points — used for
- * the bowsprit and the rigging lines. */
-function buildSpar(from: THREE.Vector3, to: THREE.Vector3, radiusStart: number, radiusEnd: number, color: number): THREE.Mesh {
-  const dir = new THREE.Vector3().subVectors(to, from);
-  const length = dir.length();
-  const geo = new THREE.CylinderGeometry(radiusEnd, radiusStart, length, 8);
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color }));
-  mesh.position.copy(from).addScaledVector(dir, 0.5);
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-  return mesh;
-}
+/** A triangular sail (the jib), since PlaneGeometry can't make that shape.
+ *
+ * Subdivided barycentrically and bellied out along its own normal. The first
+ * version was a three-triangle fan from a displaced centroid, which put a hard
+ * crease straight down the middle of the sail and read as folded card — you
+ * cannot get a smooth curve out of three flat facets. */
+function triangleSailGeometry(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): THREE.BufferGeometry {
+  const N = 5;
+  const normal = new THREE.Vector3()
+    .subVectors(b, a)
+    .cross(new THREE.Vector3().subVectors(c, a))
+    .normalize();
+  const belly = (a.distanceTo(b) + b.distanceTo(c)) * 0.055;
 
-/** A single flat triangular sail (the jib), since PlaneGeometry can't make
- * that shape. */
-function buildTriangleSail(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: number): THREE.Mesh {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute(
-    'position',
-    new THREE.BufferAttribute(new Float32Array([a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]), 3),
-  );
-  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0]), 2));
-  geo.setIndex([0, 1, 2]);
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    side: THREE.DoubleSide,
-    roughness: 0.85,
-    map: sailClothTexture(),
-  });
-  return new THREE.Mesh(geo, mat);
-}
-
-function buildHull(
-  hullColor: number,
-  sailColor: number,
-  scale: number,
-  masts: 1 | 2 = 1,
-  hullClass: HullClass = 0,
-): THREE.Group {
-  const group = new THREE.Group();
-
-  // DoubleSide because the deck is now recessed inside a bulwark: from the
-  // chase camera you look at the *inner* face of the topsides, which is a
-  // back face of the lofted shell. Front-face culling would let you see
-  // straight through the hull to the ocean beyond. No extra geometry, and
-  // the hull is small enough on screen that the overdraw is immaterial.
-  const hullMat = new THREE.MeshStandardMaterial({
-    color: hullColor,
-    roughness: 0.75,
-    map: woodGrainTexture(),
-    vertexColors: true,
-    side: THREE.DoubleSide,
-  });
-  const hull = new THREE.Mesh(buildLoftedHullGeometry(scale, hullClass), hullMat);
-  hull.castShadow = true;
-  hull.receiveShadow = true;
-  hull.name = 'hull';
-  group.add(hull);
-
-  const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6437, roughness: 0.9, map: woodGrainTexture() });
-  const deck = new THREE.Mesh(buildDeckGeometry(scale, hullClass), deckMat);
-  deck.receiveShadow = true;
-  group.add(deck);
-
-  // Stepped on the (now lower, recessed) deck rather than left hanging above
-  // it — same masthead height as before, just a longer heel.
-  const mastGeo = new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, 3.4 * scale, 16);
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21 });
-  const mast = new THREE.Mesh(mastGeo, mastMat);
-  mast.position.set(0, 2.0 * scale, -0.2 * scale);
-  mast.castShadow = true;
-  group.add(mast);
-
-  const sail = buildBilloweSail(1.4 * scale, 2.2 * scale, 0.3 * scale, sailColor);
-  sail.position.set(0, 2.2 * scale, -0.19 * scale);
-  sail.name = 'sail';
-  group.add(sail);
-
-  // A yard across the head of the mainsail — sails don't hang off nothing.
-  const yard = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.035 * scale, 0.035 * scale, 1.7 * scale, 8),
-    mastMat,
-  );
-  yard.rotation.z = Math.PI / 2;
-  yard.position.set(0, 3.3 * scale, -0.2 * scale);
-  yard.castShadow = true;
-  group.add(yard);
-
-  // Bigger classes carry a foremast — previously brigantines and galleons
-  // were just a sloop scaled up, so class was only readable as size.
-  if (masts === 2) {
-    const foreMast = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05 * scale, 0.07 * scale, 2.5 * scale, 16),
-      mastMat,
-    );
-    foreMast.position.set(0, 1.75 * scale, 1.05 * scale);
-    foreMast.castShadow = true;
-    group.add(foreMast);
-
-    const foreSail = buildBilloweSail(1.05 * scale, 1.6 * scale, 0.22 * scale, sailColor);
-    foreSail.position.set(0, 1.85 * scale, 1.06 * scale);
-    group.add(foreSail);
-
-    const foreYard = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03 * scale, 0.03 * scale, 1.3 * scale, 8),
-      mastMat,
-    );
-    foreYard.rotation.z = Math.PI / 2;
-    foreYard.position.set(0, 2.65 * scale, 1.05 * scale);
-    foreYard.castShadow = true;
-    group.add(foreYard);
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  const tmp = new THREE.Vector3();
+  // Rows i = 0…N: row i holds i+1 points along the edge from a→b lerped to a→c.
+  for (let i = 0; i <= N; i++) {
+    for (let j = 0; j <= i; j++) {
+      const wb = i === 0 ? 0 : (i - j) / N;
+      const wc = i === 0 ? 0 : j / N;
+      const wa = 1 - wb - wc;
+      tmp.set(0, 0, 0).addScaledVector(a, wa).addScaledVector(b, wb).addScaledVector(c, wc);
+      // Peaks at the centroid, zero on every edge — a proper sail belly.
+      tmp.addScaledVector(normal, 27 * wa * wb * wc * belly);
+      pos.push(tmp.x, tmp.y, tmp.z);
+      uv.push(0.5 + (wc - wb) * 0.5, 1 - i / N);
+    }
+  }
+  let row = 0;
+  for (let i = 0; i < N; i++) {
+    const next = row + i + 1;
+    for (let j = 0; j <= i; j++) {
+      idx.push(row + j, next + j, next + j + 1);
+      if (j < i) idx.push(row + j, next + j + 1, row + j + 1);
+    }
+    row = next;
   }
 
-  const flagGeo = new THREE.ConeGeometry(0.15 * scale, 0.4 * scale, 4);
-  const flagMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-  const flag = new THREE.Mesh(flagGeo, flagMat);
-  flag.rotation.z = Math.PI / 2;
-  flag.position.set(0, 3.75 * scale, -0.2 * scale);
-  group.add(flag);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
 
-  group.add(buildFoamCollar(scale, hullClass));
+// --- small rig parts ------------------------------------------------------
 
-  // --- gunwale trim, swept along the sheer curve -------------------------
-  group.add(buildSheerRail(1, scale, hullClass));
-  group.add(buildSheerRail(-1, scale, hullClass));
+const _up = new THREE.Vector3(0, 1, 0);
+const _dir = new THREE.Vector3();
+const _mid = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _m = new THREE.Matrix4();
+const _s = new THREE.Vector3(1, 1, 1);
 
-  // --- quarterdeck, plus a stepped sterncastle for the bigger classes -----
-  // Anchored to the actual (class-boosted) deck height at the stern so it
-  // sits on the deck instead of floating or clipping through it once the
-  // stern got taller. The hull's stern is a raked, curved surface that
-  // tapers to a point at the transom (see buildLoftedHullGeometry's fan
-  // closure) — a flat-bottomed box can't match that exactly, so each tier
-  // is built EMBED deeper than its nominal footing and stacked from there,
-  // guaranteeing overlap with solid geometry instead of a visible gap.
-  const EMBED = 0.12 * scale;
-  const quarterDeckTopY = sheerProfile(0.15, hullClass) * scale + 0.3 * scale;
-  // Reaches down to the *deck*, not the rail, now that they're different
-  // heights — otherwise the box would float clear of the deck by the bulwark
-  // height, or vanish behind it entirely.
-  const quarterDeckHeight = (0.3 + BULWARK_HEIGHT) * scale + EMBED;
-  const quarterDeck = new THREE.Mesh(
-    new THREE.BoxGeometry(0.86 * scale * beamFullnessMult(hullClass), quarterDeckHeight, 1.0 * scale),
-    deckMat,
-  );
-  quarterDeck.position.set(0, quarterDeckTopY - quarterDeckHeight / 2, -1.3 * scale);
-  quarterDeck.castShadow = true;
-  group.add(quarterDeck);
+/** Matrix that stretches a unit-height Y-up cylinder between two points. */
+function betweenMatrix(from: THREE.Vector3, to: THREE.Vector3, out: THREE.Matrix4): number {
+  _dir.subVectors(to, from);
+  const len = _dir.length() || 1e-4;
+  _mid.copy(from).addScaledVector(_dir, 0.5);
+  _q.setFromUnitVectors(_up, _dir.normalize());
+  out.compose(_mid, _q, _s.set(1, len, 1));
+  return len;
+}
 
+/** A rope/spar run between two points, appended to the rig. The cylinder is
+ * built one unit tall and scaled, so every rope shares one source geometry. */
+const ROPE_GEO = new THREE.CylinderGeometry(1, 1, 1, 4, 1, true);
+function addLine(rig: GeoBuilder, from: THREE.Vector3, to: THREE.Vector3, radius: number, color: THREE.Color) {
+  betweenMatrix(from, to, _m);
+  const scaled = _m.clone().multiply(new THREE.Matrix4().makeScale(radius, 1, radius));
+  rig.add(ROPE_GEO, scaled, color);
+}
+
+function place(x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): THREE.Matrix4 {
+  return new THREE.Matrix4()
+    .compose(
+      new THREE.Vector3(x, y, z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
+      new THREE.Vector3(sx, sy, sz),
+    );
+}
+
+// Shared source geometries — every ship reuses these, they're only ever read.
+const BOX = new THREE.BoxGeometry(1, 1, 1);
+const CYL8 = new THREE.CylinderGeometry(1, 1, 1, 8);
+const CYL10 = new THREE.CylinderGeometry(1, 1, 1, 10);
+const CYL6 = new THREE.CylinderGeometry(1, 1, 1, 6);
+const TORUS = new THREE.TorusGeometry(1, 0.16, 5, 10);
+
+/**
+ * Everything on a ship that isn't the hull, the sails or the waterline foam,
+ * baked into ONE geometry.
+ *
+ * This is the change that made the rest of this pass affordable. A ship used
+ * to be ~18 separate meshes (deck, mast, yard, two rails, four stays, a
+ * quarterdeck box, a bowsprit, one mesh per cannon barrel…), i.e. ~18 draw
+ * calls in the main pass and ~15 more in the shadow pass, times every ship on
+ * screen — 144 of the scene's 225 draw calls in a seven-ship fight. Merging
+ * them takes a ship to four meshes total and freed the budget to add the
+ * detail below (taffrail, stern board and windows, lantern, wheel, capstan,
+ * ratlines, anchor, gunport lids, crow's nest, pennant), all of which are now
+ * free of draw-call cost.
+ */
+function buildRigGeometry(
+  scale: number,
+  hullClass: HullClass,
+  masts: 1 | 2,
+  loadout: CannonLoadout,
+  livery: ShipLivery,
+  seed: number,
+): THREE.BufferGeometry {
+  const rig = new GeoBuilder();
+  const S = scale;
+
+  const cDeck = new THREE.Color(livery.deck);
+  const cSpar = new THREE.Color(livery.plank).multiplyScalar(0.85).lerp(new THREE.Color(0x6b4a2a), 0.5);
+  const cRope = new THREE.Color(0x39301f);
+  const cAccent = new THREE.Color(livery.accent);
+  const cAccentDim = cAccent.clone().multiplyScalar(0.72);
+  /** Dark trim — caprail, stanchions. The accent is a stripe, not a coating. */
+  const cTrim = new THREE.Color(livery.wale).multiplyScalar(0.9);
+  const cIron = new THREE.Color(0x2a2724);
+  const cDark = new THREE.Color(livery.wale).multiplyScalar(0.75);
+  const cGlass = new THREE.Color(0x8ea9b6);
+  const cBrass = new THREE.Color(0xd9b25a);
+
+  const V = (x: number, y: number, z: number) => new THREE.Vector3(x * S, y * S, z * S);
+  const sheerAt = (t: number) => sheerProfile(t, hullClass) * S;
+  const deckAt = (t: number) => deckProfile(t, hullClass) * S;
+  const beamAt = (t: number) => beamProfile(t, hullClass) * HULL_MAX_BEAM * S;
+
+  // --- deck -----------------------------------------------------------------
+  const deckGeo = buildDeckGeometry(S, hullClass);
+  rig.add(deckGeo, new THREE.Matrix4(), cDeck);
+  deckGeo.dispose();
+
+  // --- caprail, swept along the actual sheer curve, closed at both ends -----
+  // The rails used to be two open tubes that simply stopped at the stern, so
+  // from the chase camera (which looks straight up the ship's arse) the rail
+  // just ended in mid-air. They now run as one continuous loop round the whole
+  // sheer, which is also what carries the accent colour along the ship's one
+  // strong line.
+  {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 22; i++) {
+      const t = i / 22;
+      pts.push(V(beamAt(t) / S, sheerAt(t) / S + 0.05, (t - 0.5) * 2 * HULL_HALF_LENGTH));
+    }
+    for (let i = 22; i >= 0; i--) {
+      const t = i / 22;
+      pts.push(V(-beamAt(t) / S, sheerAt(t) / S + 0.05, (t - 0.5) * 2 * HULL_HALF_LENGTH));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts, true);
+    const tube = new THREE.TubeGeometry(curve, 52, 0.052 * S, 4, true);
+    rig.add(tube, new THREE.Matrix4(), cTrim);
+    tube.dispose();
+  }
+
+  // --- quarterdeck + stepped sterncastle ------------------------------------
+  // Each tier is built EMBED deeper than its nominal footing and stacked from
+  // there, guaranteeing overlap with solid geometry instead of a visible gap
+  // against the hull's raked, curved stern.
+  const EMBED = 0.12 * S;
+  const qdTop = sheerAt(0.15) + 0.3 * S;
+  const qdH = (0.3 + BULWARK_HEIGHT) * S + EMBED;
+  const qdW = 0.86 * S * beamFullnessMult(hullClass);
+  rig.add(BOX, place(0, qdTop - qdH / 2, -1.3 * S, 0, 0, 0, qdW, qdH, 1.0 * S), cDeck.clone().multiplyScalar(0.9));
+
+  let castleTop = qdTop;
   if (hullClass >= 1) {
-    const tierHeight = (hullClass === 1 ? 0.35 : 0.55) * scale;
-    const tierWidth = 0.75 * scale * (hullClass === 1 ? 1 : 1.08);
-    const tierTopY = quarterDeckTopY + tierHeight;
-    const tierTotalHeight = tierHeight + EMBED;
-    const sternCastle = new THREE.Mesh(new THREE.BoxGeometry(tierWidth, tierTotalHeight, 0.85 * scale), deckMat);
-    sternCastle.position.set(0, tierTopY - tierTotalHeight / 2, -1.5 * scale);
-    sternCastle.castShadow = true;
-    group.add(sternCastle);
-
+    const th = (hullClass === 1 ? 0.35 : 0.55) * S;
+    const tw = 0.75 * S * (hullClass === 1 ? 1 : 1.08);
+    castleTop = qdTop + th;
+    rig.add(BOX, place(0, castleTop - (th + EMBED) / 2, -1.5 * S, 0, 0, 0, tw, th + EMBED, 0.85 * S), cDeck);
     if (hullClass === 2) {
-      // A third, smaller tier — a proper stepped castle instead of one block.
-      const topHeight = 0.28 * scale;
-      const topTopY = tierTopY + topHeight;
-      const topTotalHeight = topHeight + EMBED;
-      const topTier = new THREE.Mesh(new THREE.BoxGeometry(0.5 * scale, topTotalHeight, 0.55 * scale), deckMat);
-      topTier.position.set(0, topTopY - topTotalHeight / 2, -1.6 * scale);
-      topTier.castShadow = true;
-      group.add(topTier);
+      const tth = 0.28 * S;
+      rig.add(BOX, place(0, castleTop + tth / 2 - EMBED / 2, -1.6 * S, 0, 0, 0, 0.5 * S, tth + EMBED, 0.55 * S), cDeck);
+      castleTop += tth;
     }
   }
 
-  // --- bowsprit + jib -------------------------------------------------------
-  // Springs from the stem head (the rail at the bow), which is a good deal
-  // higher than it used to be, and keeps roughly the old rake.
-  const stemHeadY = sheerProfile(0.95, hullClass) * scale;
-  const bowTip = new THREE.Vector3(0, stemHeadY + 0.42 * scale, 3.15 * scale);
-  const bowsprit = buildSpar(new THREE.Vector3(0, stemHeadY, 1.8 * scale), bowTip, 0.09 * scale, 0.04 * scale, 0x5c3a21);
-  bowsprit.castShadow = true;
-  group.add(bowsprit);
-
-  const jib = buildTriangleSail(
-    bowTip,
-    new THREE.Vector3(0, deckProfile(0.55, hullClass) * scale + 0.35 * scale, 0.2 * scale),
-    new THREE.Vector3(0, 2.35 * scale, -0.2 * scale),
-    sailColor,
-  );
-  jib.name = 'jib';
-  group.add(jib);
-
-  // --- rigging --------------------------------------------------------------
-  const mastTop = new THREE.Vector3(0, 3.55 * scale, -0.2 * scale);
-  const ropeColor = 0x2a2018;
-  group.add(buildSpar(mastTop, bowTip, 0.015 * scale, 0.015 * scale, ropeColor));
-  group.add(
-    buildSpar(
-      mastTop,
-      // Lands on top of the quarterdeck rather than inside it.
-      new THREE.Vector3(0, quarterDeckTopY, -1.75 * scale),
-      0.015 * scale,
-      0.015 * scale,
-      ropeColor,
-    ),
-  );
-
-  // Shrouds from the masthead down and *aft* to the deck edges, port and
-  // starboard — running them to midships put them straight across the face
-  // of the sail.
-  for (const side of [1, -1]) {
-    group.add(
-      buildSpar(
-        mastTop,
-        new THREE.Vector3(
-          side * beamProfile(0.32, hullClass) * HULL_MAX_BEAM * scale,
-          sheerProfile(0.32, hullClass) * scale,
-          -0.72 * scale,
-        ),
-        0.012 * scale,
-        0.012 * scale,
-        ropeColor,
-      ),
-    );
+  // --- stern board + great-cabin windows ------------------------------------
+  // Dead astern is where the chase camera lives, so the transom is the single
+  // most-looked-at surface in the game and it was a blank brown panel. A board
+  // proud of the transom carrying the accent colour and three lit windows
+  // gives the ship a face.
+  {
+    const sternZ = -HULL_HALF_LENGTH * S - 0.02 * S;
+    const beam0 = beamAt(0);
+    const keel0 = keelProfile(0) * S;
+    const sheer0 = sheerAt(0);
+    const yAt = (v: number) => keel0 + (sheer0 - keel0) * v;
+    const xAt = (v: number) => beam0 * sectionFullness(v) * 0.97;
+    // The transom is the surface the chase camera stares at all session, so
+    // the accent gets a real band here (v 0.80 → the rail) rather than the
+    // sliver it had at first, which the caprail then hid completely.
+    const vs = [0.42, 0.6, 0.78, 0.8, 1.0];
+    const cols = [cDark, cDark, cDark, cAccent, cAccent];
+    const tri: number[] = [];
+    for (let i = 0; i < vs.length - 1; i++) {
+      const y0 = yAt(vs[i]);
+      const y1 = yAt(vs[i + 1]);
+      const x0 = xAt(vs[i]);
+      const x1 = xAt(vs[i + 1]);
+      // Two triangles, wound so the outward normal points aft (-Z).
+      tri.length = 0;
+      tri.push(-x0, y0, sternZ, x0, y0, sternZ, x1, y1, sternZ);
+      tri.push(-x0, y0, sternZ, x1, y1, sternZ, -x1, y1, sternZ);
+      rig.addTriangles(tri, cols[i]);
+    }
+    // Great-cabin windows. Mullioned into a 2x2 of small panes each: three
+    // plain bright rectangles read as a robot's face, and at chase distance
+    // the mullions are what say "window" rather than "light".
+    const wy = yAt(0.655);
+    for (const wx of [-0.25, 0, 0.25]) {
+      rig.add(BOX, place(wx * S, wy, sternZ - 0.008 * S, 0, 0, 0, 0.23 * S, 0.25 * S, 0.02 * S), cTrim);
+      for (const px of [-0.055, 0.055])
+        for (const py of [-0.055, 0.055]) {
+          rig.add(
+            BOX,
+            place((wx + px) * S, wy + py * S, sternZ - 0.022 * S, 0, 0, 0, 0.078 * S, 0.078 * S, 0.02 * S),
+            cGlass,
+          );
+        }
+    }
   }
 
-  return group;
-}
+  // --- taffrail + stern lantern --------------------------------------------
+  {
+    const railY = castleTop + 0.2 * S;
+    const railZ = (hullClass >= 1 ? -1.85 : -1.7) * S;
+    const halfW = (hullClass >= 1 ? 0.36 : 0.42) * S;
+    rig.add(CYL6, place(0, railY, railZ, 0, 0, Math.PI / 2, 0.035 * S, halfW * 2, 0.035 * S), cAccent);
+    for (const sx of [-1, -0.33, 0.33, 1]) {
+      rig.add(CYL6, place(sx * halfW, railY - 0.1 * S, railZ, 0, 0, 0, 0.024 * S, 0.2 * S, 0.024 * S), cTrim);
+    }
+    // Lantern: an octagonal cage with a warm pane and a brass cap, standing
+    // right on the centreline of the chase view.
+    const ly = railY + 0.26 * S;
+    rig.add(CYL8, place(0, railY + 0.08 * S, railZ, 0, 0, 0, 0.03 * S, 0.16 * S, 0.03 * S), cIron);
+    rig.add(CYL8, place(0, ly, railZ, 0, Math.PI / 8, 0, 0.09 * S, 0.18 * S, 0.09 * S), new THREE.Color(0xffd07a));
+    rig.add(CYL8, place(0, ly + 0.11 * S, railZ, 0, Math.PI / 8, 0, 0.11 * S, 0.05 * S, 0.11 * S), cBrass);
+    rig.add(CYL8, place(0, ly - 0.1 * S, railZ, 0, Math.PI / 8, 0, 0.1 * S, 0.04 * S, 0.1 * S), cBrass);
+  }
 
-function buildCannonBarrel(scale: number): THREE.Mesh {
-  const geo = new THREE.CylinderGeometry(0.07 * scale, 0.09 * scale, 0.55 * scale, 16);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.4, roughness: 0.6 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  return mesh;
-}
+  // --- ship's wheel ---------------------------------------------------------
+  {
+    const wy = qdTop + 0.22 * S;
+    const wz = -0.92 * S;
+    rig.add(BOX, place(0, qdTop + 0.06 * S, wz, 0, 0, 0, 0.26 * S, 0.12 * S, 0.14 * S), cSpar);
+    rig.add(TORUS, place(0, wy, wz, 0, Math.PI / 2, 0, 0.19 * S, 0.19 * S, 0.19 * S), cSpar);
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 4;
+      rig.add(
+        CYL6,
+        place(0, wy, wz, Math.PI / 2, 0, a, 0.018 * S, 0.44 * S, 0.018 * S),
+        cSpar.clone().multiplyScalar(1.1),
+      );
+    }
+  }
 
-function buildCannonsGroup(loadout: CannonLoadout, scale: number, hullClass: HullClass): THREE.Group {
-  const group = new THREE.Group();
-  group.name = 'cannons';
+  // --- rudder head + tiller -------------------------------------------------
+  // The blade itself lives under an opaque ocean, so what's modelled is the
+  // part you can actually see: the stock coming up through the counter.
+  {
+    const rz = -HULL_HALF_LENGTH * S + 0.04 * S;
+    rig.add(BOX, place(0, sheerAt(0) - 0.24 * S, rz - 0.06 * S, 0, 0, 0, 0.09 * S, 0.5 * S, 0.16 * S), cDark);
+  }
 
+  // --- deck furniture -------------------------------------------------------
+  {
+    const dz = 0.15;
+    const dY = deckAt(0.5 + dz / 4) + 0.02 * S;
+    // Grating hatch.
+    rig.add(BOX, place(0, dY + 0.04 * S, 0.15 * S, 0, 0, 0, 0.42 * S, 0.07 * S, 0.5 * S), cDark);
+    rig.add(BOX, place(0, dY + 0.07 * S, 0.15 * S, 0, 0, 0, 0.34 * S, 0.03 * S, 0.42 * S), cSpar);
+    // Capstan.
+    rig.add(CYL8, place(0, deckAt(0.32) + 0.11 * S, -0.85 * S, 0, 0, 0, 0.12 * S, 0.22 * S, 0.12 * S), cSpar);
+    rig.add(CYL8, place(0, deckAt(0.32) + 0.23 * S, -0.85 * S, 0, 0, 0, 0.16 * S, 0.04 * S, 0.16 * S), cAccentDim);
+    // A couple of lashed barrels — a working ship, not a showroom model.
+    for (const [bx, bz] of [
+      [0.34, 0.72],
+      [-0.36, 0.55],
+    ]) {
+      const t = bz / (2 * HULL_HALF_LENGTH) + 0.5;
+      rig.add(CYL8, place(bx * S, deckAt(t) + 0.13 * S, bz * S, 0, 0, 0, 0.13 * S, 0.26 * S, 0.13 * S), cSpar);
+      rig.add(
+        CYL8,
+        place(bx * S, deckAt(t) + 0.13 * S, bz * S, 0, 0, 0, 0.14 * S, 0.06 * S, 0.14 * S),
+        cIron.clone().lerp(cSpar, 0.3),
+      );
+    }
+  }
+
+  // --- masts, tops, yards ---------------------------------------------------
+  const mastZ = -0.2;
+  const mastTopY = 4.55;
+  const mainYardY = 2.95;
+  const topYardY = 4.2;
+  const topY = 3.12; // crow's nest platform
+
+  rig.add(
+    CYL10,
+    place(0, ((deckAt(0.45) / S) * 1 + mastTopY) / 2 * S, mastZ * S, 0, 0, 0, 0.075 * S, (mastTopY - deckAt(0.45) / S) * S, 0.075 * S),
+    cSpar,
+  );
+  // Main yard, with a slight droop at the ends (a yard is not a broom handle).
+  rig.add(CYL8, place(0, mainYardY * S, mastZ * S, 0, 0, Math.PI / 2, 0.038 * S, 1.9 * S, 0.038 * S), cSpar);
+  rig.add(CYL8, place(0, topYardY * S, mastZ * S, 0, 0, Math.PI / 2, 0.028 * S, 1.35 * S, 0.028 * S), cSpar);
+  // Crow's nest: the classic silhouette read, and it breaks the mast's
+  // dead-straight line at exactly the height the eye lands on.
+  rig.add(CYL10, place(0, topY * S, mastZ * S, 0, 0, 0, 0.3 * S, 0.045 * S, 0.3 * S), cSpar);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    rig.add(
+      CYL6,
+      place(Math.cos(a) * 0.28 * S, (topY + 0.08) * S, mastZ * S + Math.sin(a) * 0.28 * S, 0, 0, 0, 0.016 * S, 0.16 * S, 0.016 * S),
+      cRope,
+    );
+  }
+  rig.add(TORUS, place(0, (topY + 0.15) * S, mastZ * S, Math.PI / 2, 0, 0, 0.29 * S, 0.29 * S, 0.29 * S), cRope);
+  // Masthead truck + pennant staff.
+  rig.add(CYL6, place(0, (mastTopY + 0.06) * S, mastZ * S, 0, 0, 0, 0.05 * S, 0.06 * S, 0.05 * S), cAccentDim);
+
+  // --- shrouds + ratlines ---------------------------------------------------
+  // Rope radii are deliberately a touch fatter than scale realism: at chase
+  // distance a physically-correct 3cm line is a third of a pixel wide and
+  // shimmers into noise, which is the classic "turns to mush on a phone".
+  const mastHead = V(0, topY - 0.02, mastZ);
+  for (const side of [1, -1]) {
+    const anchors: THREE.Vector3[] = [];
+    for (const t of [0.24, 0.31, 0.38]) {
+      anchors.push(V((side * beamAt(t)) / S, sheerAt(t) / S - 0.02, (t - 0.5) * 2 * HULL_HALF_LENGTH));
+    }
+    for (const a of anchors) addLine(rig, mastHead, a, 0.019 * S, cRope);
+    // Ratlines between the outermost pair of shrouds.
+    for (let r = 1; r <= 4; r++) {
+      const f = r / 5.2;
+      const p0 = new THREE.Vector3().lerpVectors(anchors[0], mastHead, f);
+      const p1 = new THREE.Vector3().lerpVectors(anchors[2], mastHead, f);
+      addLine(rig, p0, p1, 0.014 * S, cRope);
+    }
+  }
+
+  // --- foremast (bigger classes) -------------------------------------------
+  const foreZ = 1.05;
+  if (masts === 2) {
+    const fBase = deckAt(0.76) / S;
+    const fTop = 3.35;
+    rig.add(CYL8, place(0, ((fBase + fTop) / 2) * S, foreZ * S, 0, 0, 0, 0.062 * S, (fTop - fBase) * S, 0.062 * S), cSpar);
+    rig.add(CYL8, place(0, 2.65 * S, foreZ * S, 0, 0, Math.PI / 2, 0.03 * S, 1.4 * S, 0.03 * S), cSpar);
+    rig.add(CYL6, place(0, (fTop + 0.05) * S, foreZ * S, 0, 0, 0, 0.04 * S, 0.06 * S, 0.04 * S), cAccentDim);
+    for (const side of [1, -1]) {
+      const t = 0.68;
+      addLine(
+        rig,
+        V(0, fTop - 0.15, foreZ),
+        V((side * beamAt(t)) / S, sheerAt(t) / S - 0.02, (t - 0.5) * 2 * HULL_HALF_LENGTH),
+        0.017 * S,
+        cRope,
+      );
+    }
+  }
+
+  // --- bowsprit, anchor, stays ----------------------------------------------
+  const stemHeadY = sheerAt(0.95) / S;
+  const bowTip = V(0, stemHeadY + 0.42, 3.15);
+  addLine(rig, V(0, stemHeadY, 1.8), bowTip, 0.075 * S, cSpar);
+
+  // Anchor catted on the starboard bow.
+  {
+    const ax = 0.62;
+    const ay = stemHeadY - 0.34;
+    const az = 1.42;
+    rig.add(CYL6, place(ax * S, ay * S, az * S, 0, 0, 0.25, 0.028 * S, 0.62 * S, 0.028 * S), cIron);
+    rig.add(CYL6, place((ax + 0.08) * S, (ay + 0.24) * S, az * S, Math.PI / 2, 0, 0, 0.02 * S, 0.34 * S, 0.02 * S), cIron);
+    for (const s2 of [-1, 1]) {
+      rig.add(
+        BOX,
+        place((ax - 0.07) * S, (ay - 0.3) * S, (az + s2 * 0.1) * S, 0, s2 * 0.5, 0.4, 0.05 * S, 0.18 * S, 0.1 * S),
+        cIron,
+      );
+    }
+  }
+
+  addLine(rig, V(0, mastTopY - 0.1, mastZ), bowTip, 0.016 * S, cRope);
+  addLine(rig, V(0, mastTopY - 0.1, mastZ), V(0, topY + 0.16, mastZ), 0.014 * S, cRope);
+  addLine(rig, V(0, mastTopY - 0.12, mastZ), V(0, castleTop / S, -1.78), 0.016 * S, cRope);
+  // Yard lifts — the lines that hold the yardarms up. Cheap, and they stop the
+  // yards reading as free-floating sticks.
+  for (const side of [1, -1]) {
+    addLine(rig, V(0, mastTopY - 0.1, mastZ), V(side * 0.92, mainYardY, mastZ), 0.012 * S, cRope);
+    addLine(rig, V(0, mastTopY - 0.02, mastZ), V(side * 0.65, topYardY, mastZ), 0.011 * S, cRope);
+  }
+
+  // --- pennant at the masthead ---------------------------------------------
+  // A real streaming ribbon in the ship's own colour rather than a 4-sided
+  // cone. Emitted with both windings so it survives being seen from either
+  // side without needing a double-sided material for the whole rig.
+  {
+    const N = 8;
+    const tri: number[] = [];
+    const pt = (u: number, top: boolean) => {
+      const flap = Math.sin(u * 6.2 + seed) * 0.1 * u;
+      const w = (0.17 - 0.14 * u) * (top ? 1 : -1);
+      return [
+        flap * S,
+        (mastTopY + 0.24 + w - u * 0.06) * S,
+        (mastZ - 0.06 - u * 0.9) * S,
+      ] as [number, number, number];
+    };
+    for (let i = 0; i < N; i++) {
+      const u0 = i / N;
+      const u1 = (i + 1) / N;
+      const a = pt(u0, true);
+      const b = pt(u0, false);
+      const c = pt(u1, true);
+      const d = pt(u1, false);
+      tri.push(...a, ...b, ...c, ...c, ...b, ...d);
+      tri.push(...c, ...b, ...a, ...d, ...b, ...c);
+    }
+    rig.addTriangles(tri, cAccent);
+  }
+  rig.add(CYL6, place(0, (mastTopY + 0.24) * S, (mastZ - 0.06) * S, 0, 0, 0, 0.014 * S, 0.42 * S, 0.014 * S), cIron);
+
+  // --- cannons + gunports ---------------------------------------------------
   (['front', 'left', 'right'] as CannonSide[]).forEach((side) => {
-    const offsets = cannonMountOffsets(side, loadout[side], scale);
-    for (const offset of offsets) {
-      const barrel = buildCannonBarrel(scale);
+    for (const offset of cannonMountOffsets(side, loadout[side], S)) {
       // Run out through the bulwark at each gun's own station rather than all
       // at one flat height — with the sheer sweeping up toward the ends, a
       // constant Y put the forward guns below the deck and the waist guns
-      // above the rail. Sits ~40% of the way up the bulwark, i.e. muzzle
-      // level with a gunport.
-      const t = offset.z / (2 * HULL_HALF_LENGTH * scale) + 0.5;
-      const mountY = deckProfile(t, hullClass) * scale + 0.14 * scale;
-      barrel.position.set(offset.x, mountY, offset.z);
+      // above the rail.
+      const t = offset.z / (2 * HULL_HALF_LENGTH * S) + 0.5;
+      const mountY = deckAt(t) + 0.14 * S;
       if (side === 'front') {
-        barrel.rotation.x = Math.PI / 2;
-        barrel.position.z += 0.3 * scale;
+        rig.add(CYL8, place(offset.x, mountY, offset.z + 0.3 * S, Math.PI / 2, 0, 0, 0.08 * S, 0.55 * S, 0.08 * S), cIron);
+        rig.add(BOX, place(offset.x, mountY, offset.z + 0.05 * S, 0, 0, 0, 0.24 * S, 0.24 * S, 0.04 * S), cDark);
       } else {
-        barrel.rotation.z = Math.PI / 2;
-        barrel.position.x += (side === 'left' ? -0.25 : 0.25) * scale;
+        const sx = side === 'left' ? -1 : 1;
+        rig.add(
+          CYL8,
+          place(offset.x + sx * 0.25 * S, mountY, offset.z, 0, 0, Math.PI / 2, 0.08 * S, 0.55 * S, 0.08 * S),
+          cIron,
+        );
+        // Gunport: a dark recess behind the muzzle plus its lid propped open
+        // above it — this is what makes a broadside read as gunports rather
+        // than as pipes glued to a plank.
+        rig.add(BOX, place(offset.x + sx * 0.02 * S, mountY, offset.z, 0, 0, 0, 0.04 * S, 0.26 * S, 0.28 * S), cDark);
+        rig.add(
+          BOX,
+          place(offset.x + sx * 0.13 * S, mountY + 0.24 * S, offset.z, 0.55, 0, 0, 0.035 * S, 0.24 * S, 0.3 * S),
+          cAccentDim,
+        );
       }
-      group.add(barrel);
     }
   });
 
-  return group;
+  const geo = rig.build();
+  geo.computeBoundingSphere();
+  return geo;
 }
 
-function disposeGroup(group: THREE.Group) {
-  group.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) {
-      obj.geometry.dispose();
-      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-      else obj.material.dispose();
-    }
-  });
+/** Every sail on the ship, in one geometry sharing one atlas. */
+function buildSailsGeometry(scale: number, hullClass: HullClass, masts: 1 | 2): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  const S = scale;
+  const V = (x: number, y: number, z: number) => new THREE.Vector3(x * S, y * S, z * S);
+
+  // Sails carry a subtle vertical gradient: darker at the foot where the hull
+  // and the sail below shade it, brighter at the head. Free form-reading.
+  const shade = (top: number) => (local: THREE.Vector3) => {
+    const f = THREE.MathUtils.clamp(local.y / (top * S) + 0.5, 0, 1);
+    const k = 0.78 + 0.28 * f;
+    return new THREE.Color(k, k, k);
+  };
+
+  const MAIN_V: [number, number] = [0.015, 0.685];
+  const PLAIN_V: [number, number] = [0.735, 0.985];
+
+  // Mainsail — the one that carries the heraldry.
+  {
+    const g = billowedSailGeometry(1.62 * S, 1.9 * S, 0.34 * S, 10);
+    remapUV(g, 0.03, 0.97, MAIN_V[0], MAIN_V[1]);
+    b.add(g, place(0, 2.0 * S, -0.19 * S), shade(1.9));
+    g.dispose();
+  }
+  // Topsail — the second tier that turns a dinghy silhouette into a ship's.
+  {
+    const g = billowedSailGeometry(1.22 * S, 0.94 * S, 0.2 * S, 6);
+    remapUV(g, 0.06, 0.94, PLAIN_V[0], PLAIN_V[1]);
+    b.add(g, place(0, 3.72 * S, -0.19 * S), shade(0.94));
+    g.dispose();
+  }
+  if (masts === 2) {
+    const g = billowedSailGeometry(1.28 * S, 1.5 * S, 0.24 * S, 8);
+    remapUV(g, 0.06, 0.94, PLAIN_V[0], PLAIN_V[1]);
+    b.add(g, place(0, 1.88 * S, 1.06 * S), shade(1.5));
+    g.dispose();
+  }
+  // Jib.
+  {
+    const stemHeadY = sheerProfile(0.95, hullClass);
+    const g = triangleSailGeometry(
+      V(0, stemHeadY + 0.4, 3.0),
+      V(0, deckProfile(0.55, hullClass) + 0.28, 0.6),
+      V(0, 2.38, -0.14),
+    );
+    remapUV(g, 0.08, 0.92, PLAIN_V[0], PLAIN_V[1]);
+    b.add(g, new THREE.Matrix4(), new THREE.Color(0.94, 0.94, 0.94));
+    g.dispose();
+  }
+
+  const geo = b.build();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+function disposeMesh(mesh: THREE.Mesh) {
+  mesh.geometry.dispose();
+  if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
+  else mesh.material.dispose();
 }
 
 const SINK_DURATION = 2.2;
@@ -737,10 +1094,6 @@ const SINK_DURATION = 2.2;
 export class Ship {
   readonly group: THREE.Group;
   readonly scale: number;
-  private sailMesh: THREE.Mesh;
-  private hullMesh: THREE.Mesh;
-  private hullMat: THREE.MeshStandardMaterial;
-  private cannonsGroup: THREE.Group;
 
   position = new THREE.Vector3();
   heading = 0; // radians, 0 = facing -Z
@@ -751,27 +1104,37 @@ export class Ship {
 
   stats: ShipStats;
   loadout: CannonLoadout;
+
+  private sailsMesh: THREE.Mesh;
+  private rigMesh: THREE.Mesh;
+  private hullMat: THREE.MeshStandardMaterial;
+  private sailMat: THREE.MeshStandardMaterial;
+  private foamMat: THREE.MeshBasicMaterial;
+
   private bobPhase = Math.random() * Math.PI * 2;
   private hitFlash = 0;
   private sinking = false;
   private sinkTimer = 0;
   private sinkListDir = 1;
-  private sailMat: THREE.MeshStandardMaterial;
-  private foamMat!: THREE.MeshBasicMaterial;
   private baseSailColor: THREE.Color;
   private burning = false;
   private sailDisabled = false;
   private readonly hullClass: HullClass;
+  private readonly masts: 1 | 2;
+  private readonly livery: ShipLivery;
+  private readonly seed: number;
 
   constructor(
     stats: ShipStats,
     opts: {
-      hullColor?: number;
-      sailColor?: number;
       scale?: number;
       loadout?: CannonLoadout;
       masts?: 1 | 2;
       hullClass?: HullClass;
+      livery?: Partial<ShipLivery>;
+      /** Stable per-captain number; drives weathering and the pennant's flap
+       * phase so two ships in the same livery still aren't clones. */
+      seed?: number;
     } = {},
   ) {
     this.stats = stats;
@@ -780,21 +1143,76 @@ export class Ship {
     this.maxHealth = 60 + stats.hullLevel * 40;
     this.health = this.maxHealth;
     this.hullClass = opts.hullClass ?? 0;
-    this.group = buildHull(
-      opts.hullColor ?? 0x6b4a2c,
-      opts.sailColor ?? 0xe8e0cf,
-      this.scale,
-      opts.masts ?? 1,
-      this.hullClass,
+    this.masts = opts.masts ?? 1;
+    this.livery = { ...DEFAULT_LIVERY, ...opts.livery };
+    this.seed = opts.seed ?? Math.floor(Math.random() * 1000);
+
+    this.group = new THREE.Group();
+
+    // Hull. DoubleSide because the deck is recessed inside a bulwark: from the
+    // chase camera you look at the *inner* face of the topsides, which is a
+    // back face of the lofted shell, and front-face culling would let you see
+    // straight through the hull to the ocean beyond.
+    this.hullMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.72,
+      map: woodGrainTexture(),
+      vertexColors: true,
+      side: THREE.DoubleSide,
+    });
+    const hull = new THREE.Mesh(
+      buildLoftedHullGeometry(this.scale, this.hullClass, this.livery, this.seed),
+      this.hullMat,
     );
-    this.sailMesh = this.group.getObjectByName('sail') as THREE.Mesh;
-    this.hullMesh = this.group.getObjectByName('hull') as THREE.Mesh;
-    this.hullMat = this.hullMesh.material as THREE.MeshStandardMaterial;
-    this.foamMat = (this.group.getObjectByName('foam') as THREE.Mesh).material as THREE.MeshBasicMaterial;
-    this.sailMat = this.sailMesh.material as THREE.MeshStandardMaterial;
+    hull.castShadow = true;
+    hull.receiveShadow = true;
+    hull.name = 'hull';
+    this.group.add(hull);
+
+    // Rig — everything else, in one mesh.
+    this.rigMesh = new THREE.Mesh(
+      buildRigGeometry(this.scale, this.hullClass, this.masts, this.loadout, this.livery, this.seed),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        vertexColors: true,
+        map: woodGrainTexture(),
+        roughness: 0.78,
+        metalness: 0.05,
+      }),
+    );
+    this.rigMesh.castShadow = true;
+    this.rigMesh.receiveShadow = true;
+    this.group.add(this.rigMesh);
+
+    // Sails.
+    this.sailMat = new THREE.MeshStandardMaterial({
+      color: this.livery.sail,
+      map: sailAtlasTexture(this.livery.emblem % EMBLEM_COUNT),
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      roughness: 0.95,
+      metalness: 0,
+      // Canvas is thin: sunlight on the far side lights the near side up. The
+      // chase camera looks at the SHADOWED back of the mainsail, which without
+      // this reads as a flat grey card — the single worst thing about how the
+      // ship used to look from where the player actually sits.
+      //
+      // Routed through emissiveMap, not a flat emissive: three adds `emissive`
+      // AFTER the diffuse map, so a flat term floods the heraldry with light
+      // and the device washes out to a pale ghost exactly when the sail is in
+      // shadow, which is the one time the player is looking at it.
+      emissive: new THREE.Color(this.livery.sail).multiplyScalar(0.26),
+      emissiveMap: sailAtlasTexture(this.livery.emblem % EMBLEM_COUNT),
+    });
+    this.sailsMesh = new THREE.Mesh(buildSailsGeometry(this.scale, this.hullClass, this.masts), this.sailMat);
+    this.sailsMesh.castShadow = true;
+    this.sailsMesh.name = 'sail';
+    this.group.add(this.sailsMesh);
     this.baseSailColor = this.sailMat.color.clone();
-    this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale, this.hullClass);
-    this.group.add(this.cannonsGroup);
+
+    const foam = buildFoamCollar(this.scale, this.hullClass);
+    this.foamMat = foam.material as THREE.MeshBasicMaterial;
+    this.group.add(foam);
   }
 
   get topSpeed() {
@@ -803,10 +1221,17 @@ export class Ship {
 
   setLoadout(loadout: CannonLoadout) {
     this.loadout = { ...loadout };
-    this.group.remove(this.cannonsGroup);
-    disposeGroup(this.cannonsGroup);
-    this.cannonsGroup = buildCannonsGroup(this.loadout, this.scale, this.hullClass);
-    this.group.add(this.cannonsGroup);
+    // Guns live inside the merged rig, so a loadout change rebuilds that one
+    // geometry. It happens at the shipyard, not in combat.
+    this.rigMesh.geometry.dispose();
+    this.rigMesh.geometry = buildRigGeometry(
+      this.scale,
+      this.hullClass,
+      this.masts,
+      this.loadout,
+      this.livery,
+      this.seed,
+    );
   }
 
   flashHit() {
@@ -819,7 +1244,9 @@ export class Ship {
   setStatusEffects(sailDisabled: boolean, burning: boolean) {
     if (sailDisabled !== this.sailDisabled) {
       this.sailDisabled = sailDisabled;
-      this.sailMat.color.copy(sailDisabled ? new THREE.Color(0x8a8378) : this.baseSailColor);
+      const c = sailDisabled ? new THREE.Color(0x8a8378) : this.baseSailColor;
+      this.sailMat.color.copy(c);
+      this.sailMat.emissive.copy(c).multiplyScalar(sailDisabled ? 0.12 : 0.26);
     }
     this.burning = burning;
   }
@@ -851,16 +1278,17 @@ export class Ship {
     if (this.sinking) this.sinkTimer = Math.min(SINK_DURATION, this.sinkTimer + dt);
   }
 
+  dispose() {
+    this.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) disposeMesh(obj);
+    });
+  }
+
   /**
    * @param waveHeight wave height at the ship's own x/z
    * @param waveAt optional sampler for wave height at an arbitrary x/z. When
    *   supplied the hull rides the chord between its bow and stern instead of
-   *   sitting flat at its centre height. This matters more than it sounds: the
-   *   ocean's three swells sum to ±1.65 world units, and across a 4-unit hull
-   *   the surface can differ by up to ~0.27 units end to end — which used to
-   *   be over half of the entire 0.50 freeboard, so on a passing crest the
-   *   water genuinely rose over the gunwale amidships or at one end. Riding
-   *   the chord drops that residual to under 0.05. Reused, not allocated.
+   *   sitting flat at its centre height. Reused, not allocated.
    */
   syncVisual(waveHeight: number, time: number, waveAt?: (x: number, z: number) => number) {
     let baseY = waveHeight;
@@ -883,7 +1311,6 @@ export class Ship {
       this.group.rotation.y = this.heading;
       this.group.rotation.z = this.sinkListDir * eased * 0.9;
       this.group.rotation.x = pitch * (1 - eased) + eased * 0.4;
-      // A sunk hull is under the surface; its waterline foam has to go with it.
       this.foamMat.opacity = Math.max(0, 0.6 * (1 - t * 3));
       return;
     }
@@ -893,15 +1320,12 @@ export class Ship {
     this.group.rotation.z = bob;
     this.group.rotation.x = pitch + Math.sin(time * 1.3 + this.bobPhase) * 0.02;
     const speedFrac = Math.min(Math.abs(this.speed) / this.topSpeed, 1);
-    this.sailMesh.rotation.y = speedFrac * 0.15;
-    // Never zero — a hove-to ship still has a wet waterline — but a moving
-    // one throws noticeably more. Cheap scalar write, no allocation.
-    //
-    // Backed off from 0.42 + 0.5*speed: the ocean shader now draws its own
-    // bow collar and stern wash analytically (see Ocean.ts's wake loop), and
-    // at full speed the two summed to a hard, blown-out white ellipse around
-    // the hull. This collar's job is only the contact line where hull meets
-    // water; the volume of foam is the ocean's to draw.
+    // Every sail is one mesh pivoting about x=0 — which is exactly where all
+    // the masts are — so trimming the whole mesh trims each sail correctly.
+    this.sailsMesh.rotation.y = speedFrac * 0.16;
+    // Never zero — a hove-to ship still has a wet waterline — but a moving one
+    // throws noticeably more. The ocean shader draws the volume of foam
+    // analytically; this collar's job is only the hull/water contact line.
     this.foamMat.opacity = 0.34 + speedFrac * 0.3 + Math.sin(time * 3.1 + this.bobPhase) * 0.04;
   }
 

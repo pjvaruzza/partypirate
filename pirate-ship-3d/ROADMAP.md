@@ -1355,3 +1355,182 @@ pass's scope:
 3. The bottom rack costs ~99px of a 667px screen. That is a deliberate
    trade (the mechanic was invisible; now it is not), but if the HUD gains
    anything else at the bottom, this is the budget it comes out of.
+
+---
+
+## Art pass — the ship, and the two placeholder economy props (art-director)
+
+The previous art pass rebuilt the ocean and the islands and closed by naming
+what was then holding the frame back: **the ships had become the weakest thing
+in it** — a flat brown hull with one plain sail against a rebuilt sea — and the
+salvage piles and sanctuary ring were still placeholder additive discs that
+blew out to white ellipses. This pass is that list.
+
+### Root cause: a ship's paint had nowhere to live
+
+The hull loft (sheer, bulwark, boot-top, transom) was fine. What was missing
+was any way to put a second value on it. Two specific findings, both measured
+rather than assumed:
+
+1. **The boot-top stripe has never actually been visible.** The hull sampled
+   its cross-section at 16 *evenly spaced* points rail-to-rail and wrote colour
+   into those vertices. Even spacing puts a sample every ~0.17 world units of
+   hull depth; the boot band is 0.09 tall, so it landed inside a single vertex
+   and Gouraud-smeared into a 0.34-unit brown gradient. The same arithmetic
+   killed any stripe, wale or painted band anyone might have added.
+   **Fix:** keep the vertex budget, move the samples. `stationVs()` now places
+   14 per-side samples on the features that have to render crisply — a tight
+   pair straddling the waterline, a pair for the wale, one just under the deck
+   line, and a quadruple around the sheer stripe — computed per station from
+   `waterV(t)`/`deckV(t)`, so every band follows the rocker and the sheer the
+   way real paint does. Girth 16 → 26 (+320 tris/ship), and the hull material
+   is now white with `vertexColors`, i.e. the whole paint scheme lives in the
+   mesh at zero texture and zero draw-call cost.
+
+2. **A ship was ~18 meshes, and that was the real ceiling.** Deck, mast, yard,
+   two rails, four stays, a quarterdeck box, a bowsprit and *one mesh per
+   cannon barrel* — 17 draw calls for a sloop in the main pass plus ~15 more
+   in the shadow pass, times every ship on screen. That was 144 of the scene's
+   225 draw calls in a seven-ship fight, and it meant every detail anyone
+   wanted to add cost another call per ship.
+   **Fix:** everything that isn't the hull, the sails or the waterline foam is
+   baked into ONE vertex-coloured geometry via the existing `GeoBuilder`
+   (`buildRigGeometry`), and all four sails share one atlas and merge into a
+   second (`buildSailsGeometry`). A ship is now **4 meshes, always** — hull,
+   rig, sails, foam. `setLoadout` rebuilds the rig geometry, which happens at
+   the shipyard, not in combat.
+
+### What the freed budget bought
+
+- **Sheer stripe as identity.** A ~0.1-unit painted band under a dark caprail,
+  tracing the sheer — the one line on a hull the eye follows, so it reads at
+  40px. The first cut painted the *whole* bulwark and every ship turned into a
+  bathtub with a fluorescent rim; the band was cut from 0.25 v-units to 0.075
+  and the caprail flipped from `accent × 1.18` to `wale × 0.9` to cap it.
+- **`ShipLivery` + `game/Livery.ts`.** Every hull in the game used to be
+  `0x6b4a2c`. Now: you get gold-on-oak with the skull and nothing else is
+  allowed to use it; other captains get the same honest wood with one of eight
+  trim colours and one of eight devices by name hash; bots are drab, small and
+  oxide-striped so a shape is never mistaken for a person; rivals and the boss
+  get full schemes. Two-octave value noise seeded per captain weathers the
+  planking (painted surfaces weather 30% less, so trim stays legible on a
+  filthy hull).
+- **A real sail.** The old `sailClothTexture` was 64px of 0.22-alpha vertical
+  hairlines that landed sub-pixel and rendered as flat cream. Replaced by a
+  256px atlas with weave, cloth-panel seams (light/dark stitch pairs), two reef
+  bands with reef points, per-atlas staining and a bolt-rope hem — plus **eight
+  heraldic devices** in region `v 0…0.70`, with `v 0.72…1` left clean for the
+  topsail, foresail and jib so all four sails share one texture and one mesh.
+- **Sail translucency, done right.** The chase camera looks at the *shadowed
+  back* of the mainsail, which read as a flat grey card. Canvas is thin, so the
+  sail gets an emissive term — routed through `emissiveMap` using the same
+  atlas, because three adds flat `emissive` *after* the diffuse map and a
+  constant term washed the heraldry out to a pale ghost precisely when the
+  player was looking at it.
+- **A silhouette.** Mast raised to 4.55 with a **topsail** on a second yard and
+  a **crow's nest** at 3.12 — two tiers is what separates "ship" from "dinghy"
+  at distance. Plus three shrouds and four ratlines a side, yard lifts, a
+  streaming pennant in the ship's colour (a real ribbon, not a 4-sided cone),
+  a catted anchor, gunports with propped-open lids behind each barrel,
+  a capstan, a grating hatch, lashed barrels and a ship's wheel.
+- **A stern worth looking at.** Dead astern is where the camera lives all
+  session and it was a blank brown panel. Added a transom board carrying the
+  accent band from v0.80 to the rail, three mullioned great-cabin windows (2×2
+  panes each — three plain bright rectangles read as a robot's face), a
+  taffrail on stanchions, a stern lantern on the centreline, a rudder head, and
+  a caprail that now runs as one closed loop round the whole sheer instead of
+  two tubes that stopped in mid-air at the transom.
+- **Jib.** Was a three-triangle fan off a displaced centroid — a hard crease
+  straight down the middle that read as folded card. Now barycentrically
+  subdivided (N=5) with the belly peaking at the centroid and zero on every
+  edge.
+- **Ship geometry is disposed** on removal (`Ship.dispose()`), called from
+  main.ts's three teardown sites. Hull and rig geometry is per-instance, so
+  dropping the reference alone leaked GPU buffers every time a ship sailed out
+  of range — true before this pass too.
+
+### The two placeholders — `game/Markers.ts`
+
+One rule applied to both: **no large flat additive surfaces over water.**
+Additive is now reserved for small, shaped things; anything covering real
+screen area is normal alpha with structure in it.
+
+- **Salvage** was three emissive icosahedra over a 2.2-unit additive disc.
+  Now: a burst chest with its lid hung open and gold heaped out of it, a
+  half-submerged barrel, splintered planks, and 18 oversized doubloons turning
+  in the swell (the originals were ~3px at chase distance and read as yellow
+  specks), over a soft irregular normal-blended slick. Debris wood is
+  deliberately *lighter* than a hull's — at half a wave's height, dark wood
+  reads as a rock. The findability shaft went 5.5 units → 1.15 and 0.5 → 0.4
+  base alpha, and from near-white to saturated amber: at its first size it was
+  three white columns running off the top of frame and through the horizon,
+  which is the same failure the additive disc had in a new costume. The group
+  lolls with the swell rather than spinning like a pickup icon.
+- **The sanctuary ward** was a flat additive `RingGeometry` at 0.4 opacity that
+  fought the ocean's own wake foam. Now a low curtain of light standing out of
+  the water (brightest where it leaves the surface, gone by the top) with a
+  slowly scrolling pattern, over a soft disc brightest at the rim. **The first
+  cut of the pattern was crisp 3px chevrons at 0.9 alpha and screenshotted as
+  white claw-marks raked across the sea** — replaced with soft vertical shafts
+  of varying width and no hard edges anywhere. Geometry and materials are
+  shared, so the scroll and pulse are one uniform write per frame regardless of
+  how many wards are up.
+
+### Cost
+
+Measured with `renderer.info.render`, desktop 1280×720, same spawn, same
+6 seconds after join at the home port:
+
+| | draw calls | triangles |
+|---|---|---|
+| before | 225 | 114,424 |
+| after | **108** | 129,859 |
+
+**−52% draw calls for +13.5% triangles** — the right side of that trade on
+mobile, where draw calls are the CPU bottleneck. Per ship: **17 meshes /
+~3,510 tris → 4 meshes / 4,675 tris** (hull 1,718, rig 2,512, sails 297, foam
+148). Note `renderer.info` counts the shadow pass, so the per-ship draw-call
+saving is roughly double what the scene total shows. No new per-frame
+allocations; all marker geometry and materials are module-level singletons.
+
+### Verification
+
+Playwright, real join flow, at desktop 1280×720 and phone 390×844 @3×.
+Chase-cam framing verified honestly: the headless renderer runs at a few fps
+while main.ts clamps `dt` to 0.05 and the *server* advances the ship in real
+time, so a moving chase camera lags ~24 units back there versus the 15.4
+measured once settled (which matches the 13/5.2 rig at 60fps) — the "sailing"
+shots exaggerate the distance and the settled ones are the truthful framing.
+Detail shots posed via a temporary `renderer.render` wrapper; salvage piles
+injected via a dev-server `import()` because piles only exist after a real
+sinking. Hook stripped: `grep -c "__pg\|__probe\|__debug" src/main.ts
+src/game/*.ts` is 0 on every file, and the final run was taken with no hook
+present and zero `pageerror`s. `npx tsc --noEmit` and `npm run build` clean.
+
+### Honest assessment / handoffs
+
+The ship now holds its own against the sea: at real chase framing it reads as
+a two-tier square rig with a dark hull, a gold sheer line, gunports and a
+skull on the mainsail, and another captain 60 units away is identifiable by
+trim colour alone. It is no longer the weakest thing in the frame — I'd now
+say the **weakest thing is what happens when two of them fight**: muzzle
+flashes are five additive spheres, cannonballs are a sphere and a cone, and a
+sinking is a particle burst. That is the next thing worth an art pass.
+
+Three handoffs:
+
+1. **`mobile-perf`:** the triangle count went the wrong way (+13.5%) even
+   though draw calls halved. If the fill/vertex budget on a real phone is
+   tighter than the call budget, the cheapest ~800 tris/ship to give back are
+   the ratlines (8 lines), the crow's nest stanchions (6) and the ship's wheel
+   spokes — all pure decoration that could go behind a distance check. I did
+   not gate them on distance because the merge means a LOD swap would need a
+   second baked geometry per ship class.
+2. **`gameplay-designer`:** heraldic devices are assigned by `hashString(name)`
+   in `game/Livery.ts`. If captain identity ever becomes a real feature
+   (bounties, rivalries, a kill feed), the device wants to be a persisted,
+   chosen thing, not a hash — the rendering side is already keyed on an index
+   and would take a server field unchanged.
+3. **`mobile-ux`:** at 390×844 the minimap's lower edge now overlaps the
+   horizon band where distant ships appear, and a ship at ~200 units sits
+   almost exactly under it. Not mine to move.

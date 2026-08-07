@@ -3,6 +3,15 @@ import * as THREE from 'three';
 import { Ocean } from './game/Ocean';
 import { Sky } from './game/Sky';
 import { Ship, cannonMountOffsets } from './game/Ship';
+import { hashString, shipVisualOptions } from './game/Livery';
+import {
+  buildSalvageMarker,
+  buildWardMarker,
+  updateSalvageMarker,
+  updateWardMarkers,
+  type SalvageVisual,
+  type WardVisual,
+} from './game/Markers';
 import { World, buildCrateMesh } from './game/World';
 import { TreasureMarker } from './game/TreasureMarker';
 import { OutpostMarkers } from './game/OutpostMarkers';
@@ -16,7 +25,6 @@ import { Tutorial } from './ui/Tutorial';
 import { Minimap } from './ui/Minimap';
 import { Network } from './net/Network';
 import {
-  SHIP_CLASS_SCALE,
   type CannonballSnapshot,
   type CrateInfo,
   type GameEvent,
@@ -206,136 +214,54 @@ function syncCannonballs(balls: CannonballSnapshot[]) {
   }
 }
 
-/** Distinct hull/sail palette for named rival captains — picked deterministically
- * from the name so the same captain always looks the same across sightings. */
-const RIVAL_COLORS = [
-  { hull: 0x2b1a3a, sail: 0x8a3fd6 },
-  { hull: 0x1a2f3a, sail: 0x3fb8d6 },
-  { hull: 0x3a2a1a, sail: 0xd68a3f },
-  { hull: 0x1a3a22, sail: 0x3fd66b },
-  { hull: 0x3a1a1a, sail: 0xd63f5a },
-  { hull: 0x2a2a2a, sail: 0xd6d63f },
-];
-
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-function shipVisualOptions(isYou: boolean, ship: ShipSnapshot) {
-  // Two masts and a galleon-shaped hull (stepped sterncastle, fuller beam)
-  // for anything bigger than a sloop, so class reads structurally and not
-  // just as "the same ship, larger."
-  if (ship.isBoss) return { hullColor: 0x1c1712, sailColor: 0x6b1010, scale: 1.5, masts: 2 as const, hullClass: 2 as const };
-  if (ship.isRival) {
-    const c = RIVAL_COLORS[hashString(ship.name) % RIVAL_COLORS.length];
-    return { hullColor: c.hull, sailColor: c.sail, scale: 1.2, masts: 2 as const, hullClass: 2 as const };
-  }
-  if (ship.isBot) return { hullColor: 0x4a3527, sailColor: 0x8b1e1e, scale: 0.9, masts: 1 as const, hullClass: 0 as const };
-
-  const scale = SHIP_CLASS_SCALE[ship.shipClass];
-  const masts: 1 | 2 = ship.shipClass === 'sloop' ? 1 : 2;
-  const hullClass: 0 | 1 | 2 = ship.shipClass === 'sloop' ? 0 : ship.shipClass === 'brigantine' ? 1 : 2;
-  // Slightly off-white canvas rather than near-pure white — the brighter
-  // value clipped to a flat highlight under the sun and lost the billow.
-  if (isYou) return { hullColor: 0x6b4a2c, sailColor: 0xd8cdb4, scale, masts, hullClass };
-  return { hullColor: 0x6b4a2c, sailColor: 0x6ba8d6, scale, masts, hullClass };
-}
-
 function sameLoadout(a: ShipSnapshot['loadout'], b: ShipSnapshot['loadout']): boolean {
   return a.front === b.front && a.left === b.left && a.right === b.right;
 }
 
-/** Placeholder visual for spilled hold gold — a glinting coin cluster over a
- * flat slick. Deliberately the simplest thing that reads as "loot in the
- * water" and is findable at a glance; a proper floating-debris/coin-shimmer
- * treatment is an art-director job, as is showing it on the minimap. */
-const SALVAGE_GEO = new THREE.IcosahedronGeometry(0.55, 0);
-const SALVAGE_MAT = new THREE.MeshStandardMaterial({
-  color: 0xffcc44,
-  emissive: 0xffa000,
-  emissiveIntensity: 0.85,
-  roughness: 0.3,
-  metalness: 0.9,
-});
-const SALVAGE_SLICK_GEO = new THREE.CircleGeometry(2.2, 20);
-const SALVAGE_SLICK_MAT = new THREE.MeshBasicMaterial({
-  color: 0xffd76a,
-  transparent: true,
-  opacity: 0.28,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-});
-
-function buildSalvageMesh(): THREE.Group {
-  const group = new THREE.Group();
-  for (let i = 0; i < 3; i++) {
-    const coin = new THREE.Mesh(SALVAGE_GEO, SALVAGE_MAT);
-    const a = (i / 3) * Math.PI * 2;
-    coin.position.set(Math.cos(a) * 0.7, 0.35 + i * 0.12, Math.sin(a) * 0.7);
-    group.add(coin);
-  }
-  const slick = new THREE.Mesh(SALVAGE_SLICK_GEO, SALVAGE_SLICK_MAT);
-  slick.rotation.x = -Math.PI / 2;
-  slick.position.y = 0.06;
-  group.add(slick);
-  return group;
-}
-
-const renderedSalvage = new Map<string, THREE.Group>();
+/** Spilled hold gold. The visual lives in game/Markers.ts — see the note there
+ * on why the old additive disc had to go. */
+const renderedSalvage = new Map<string, { vis: SalvageVisual; phase: number }>();
 
 function syncSalvage(piles: SalvageInfo[]) {
   const seen = new Set<string>();
   for (const pile of piles) {
     seen.add(pile.id);
     if (renderedSalvage.has(pile.id)) continue;
-    const group = buildSalvageMesh();
-    group.position.set(pile.x, 0, pile.z);
-    scene.add(group);
-    renderedSalvage.set(pile.id, group);
+    const vis = buildSalvageMarker();
+    vis.group.position.set(pile.x, 0, pile.z);
+    scene.add(vis.group);
+    renderedSalvage.set(pile.id, { vis, phase: hashString(pile.id) % 628 / 100 });
   }
-  for (const [id, group] of renderedSalvage) {
+  for (const [id, entry] of renderedSalvage) {
     if (seen.has(id)) continue;
-    scene.remove(group);
+    scene.remove(entry.vis.group);
     renderedSalvage.delete(id);
   }
 }
 
-/** Flat ring under any ship that currently can't deal or take damage (in the
- * port sanctuary, freshly respawned, or a disconnected ghost). Without it a
- * player just watches their broadsides pass harmlessly through someone with
- * no explanation. Placeholder — art-director owns making this read as a
- * harbour ward rather than a debug circle. */
-const PROTECT_RING_GEO = new THREE.RingGeometry(2.4, 3.0, 28);
-const PROTECT_RING_MAT = new THREE.MeshBasicMaterial({
-  color: 0x8fd8ff,
-  transparent: true,
-  opacity: 0.4,
-  side: THREE.DoubleSide,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-});
-const renderedProtectRings = new Map<string, THREE.Mesh>();
+/** Harbour ward under any ship that currently can't deal or take damage (in
+ * the port sanctuary, freshly respawned, or a disconnected ghost). Without it
+ * a player just watches their broadsides pass harmlessly through someone with
+ * no explanation. Visual in game/Markers.ts. */
+const renderedProtectRings = new Map<string, WardVisual>();
 
 function syncProtectionRing(id: string, ship: ShipSnapshot, y: number) {
   const want = ship.protectedFromDamage && ship.alive;
   const existing = renderedProtectRings.get(id);
   if (!want) {
     if (existing) {
-      scene.remove(existing);
+      scene.remove(existing.group);
       renderedProtectRings.delete(id);
     }
     return;
   }
-  let ring = existing;
-  if (!ring) {
-    ring = new THREE.Mesh(PROTECT_RING_GEO, PROTECT_RING_MAT);
-    ring.rotation.x = -Math.PI / 2;
-    scene.add(ring);
-    renderedProtectRings.set(id, ring);
+  let ward = existing;
+  if (!ward) {
+    ward = buildWardMarker();
+    scene.add(ward.group);
+    renderedProtectRings.set(id, ward);
   }
-  ring.position.set(ship.x, y + 0.15, ship.z);
+  ward.group.position.set(ship.x, y + 0.08, ship.z);
 }
 
 function syncCrates(crates: CrateInfo[]) {
@@ -356,14 +282,17 @@ function syncCrates(crates: CrateInfo[]) {
 }
 
 function clearWorldState() {
-  for (const ship of renderedShips.values()) scene.remove(ship.group);
+  for (const ship of renderedShips.values()) {
+    scene.remove(ship.group);
+    ship.dispose();
+  }
   renderedShips.clear();
   renderedShipClass.clear();
   for (const mesh of renderedCrates.values()) scene.remove(mesh);
   renderedCrates.clear();
-  for (const group of renderedSalvage.values()) scene.remove(group);
+  for (const entry of renderedSalvage.values()) scene.remove(entry.vis.group);
   renderedSalvage.clear();
-  for (const ring of renderedProtectRings.values()) scene.remove(ring);
+  for (const ward of renderedProtectRings.values()) scene.remove(ward.group);
   renderedProtectRings.clear();
   for (const vis of renderedCannonballs.values()) scene.remove(vis.group);
   renderedCannonballs.clear();
@@ -605,11 +534,15 @@ function animate() {
     mesh.position.y = h + 0.3;
     mesh.rotation.y = elapsed * 0.6;
   }
-  for (const group of renderedSalvage.values()) {
-    const h = ocean.getHeightAt(group.position.x, group.position.z, elapsed);
-    group.position.y = h;
-    group.rotation.y = elapsed * 1.1;
+  for (const entry of renderedSalvage.values()) {
+    const g = entry.vis.group;
+    g.position.y = ocean.getHeightAt(g.position.x, g.position.z, elapsed);
+    // Debris lolls with the swell rather than spinning like a pickup icon.
+    g.rotation.z = Math.sin(elapsed * 1.1 + entry.phase) * 0.09;
+    g.rotation.x = Math.sin(elapsed * 0.83 + entry.phase * 1.7) * 0.07;
+    updateSalvageMarker(entry.vis, elapsed, entry.phase);
   }
+  updateWardMarkers(elapsed);
   const treasureH = ocean.getHeightAt(treasureMarker.group.position.x, treasureMarker.group.position.z, elapsed);
   treasureMarker.update(dt, elapsed, treasureH);
   outpostMarkers.sync(network.state?.outposts ?? [], elapsed);
@@ -636,6 +569,7 @@ function animate() {
       let ship = renderedShips.get(cur.id);
       if (ship && renderedShipClass.get(cur.id) !== cur.shipClass) {
         scene.remove(ship.group);
+        ship.dispose();
         ship = undefined;
       }
       if (!ship) {
@@ -682,11 +616,14 @@ function animate() {
     for (const [id, ship] of renderedShips) {
       if (seenIds.has(id)) continue;
       scene.remove(ship.group);
+      // A ship's hull and rig geometry is built per instance, so dropping the
+      // reference alone leaks GPU buffers every time one sails out of range.
+      ship.dispose();
       renderedShips.delete(id);
       renderedShipClass.delete(id);
-      const ring = renderedProtectRings.get(id);
-      if (ring) {
-        scene.remove(ring);
+      const ward = renderedProtectRings.get(id);
+      if (ward) {
+        scene.remove(ward.group);
         renderedProtectRings.delete(id);
       }
     }
@@ -745,7 +682,5 @@ function animate() {
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
-
-(window as any).__probe = { get: () => ({ scene, camera, renderer, THREE, ships: renderedShips, network }) };
 
 requestAnimationFrame(animate);
