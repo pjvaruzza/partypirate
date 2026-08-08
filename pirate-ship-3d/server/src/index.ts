@@ -1,0 +1,154 @@
+import { randomUUID } from 'node:crypto';
+import { WebSocketServer, type WebSocket } from 'ws';
+import { GameRoom } from './GameRoom';
+import { flushSync, loadPlayer } from './persistence';
+import { flushWorldSync } from './worldPersistence';
+import type {
+  ClientMessage,
+  ServerMessage,
+  ShipSnapshot,
+  CannonballSnapshot,
+  CrateInfo,
+  SalvageInfo,
+} from '../../src/shared/protocol';
+
+const PORT = Number(process.env.PORT ?? 8787);
+const TICK_MS = 50;
+const MAX_NAME_LENGTH = 20;
+
+const room = new GameRoom();
+const wss = new WebSocketServer({ port: PORT });
+
+console.log(`Pirate ship server listening on ws://0.0.0.0:${PORT}`);
+
+function send(socket: WebSocket, message: ServerMessage) {
+  if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
+}
+
+wss.on('connection', (socket: WebSocket) => {
+  let shipId: string | null = null;
+
+  socket.on('message', (raw) => {
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+
+    if (msg.type === 'join') {
+      if (shipId) return;
+      const name = String(msg.name || 'Captain').trim().slice(0, MAX_NAME_LENGTH) || 'Captain';
+
+      const reclaimable = room.findReclaimableShip(name);
+      if (reclaimable) {
+        room.reconnectPlayer(reclaimable, socket);
+        shipId = reclaimable.id;
+      } else {
+        const economy = loadPlayer(name);
+        shipId = randomUUID();
+        room.addPlayer(shipId, name, socket, economy);
+      }
+      send(socket, { type: 'welcome', yourId: shipId, worldRadius: room.worldRadius, islands: room.islands });
+      return;
+    }
+
+    if (!shipId) return;
+    const ship = room.ships.get(shipId);
+    if (!ship || ship.isBot) return;
+
+    if (msg.type === 'input') {
+      ship.input = msg.input;
+    } else if (msg.type === 'buy') {
+      room.buyUpgrade(ship, msg.key);
+    } else if (msg.type === 'loadout') {
+      room.setLoadoutSlot(ship, msg.side, msg.delta);
+    } else if (msg.type === 'chat') {
+      room.chat(ship, msg.text);
+    } else if (msg.type === 'buyClass') {
+      room.buyShipClass(ship);
+    }
+  });
+
+  socket.on('close', () => {
+    if (shipId) room.disconnectPlayer(shipId);
+  });
+});
+
+let lastTick = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  const dt = Math.min(0.1, (now - lastTick) / 1000);
+  lastTick = now;
+  room.tick(dt);
+  broadcast();
+}, TICK_MS);
+
+function broadcast() {
+  const shipsSnapshot: ShipSnapshot[] = [...room.ships.values()].map((s) => ({
+    id: s.id,
+    name: s.name,
+    isBot: s.isBot,
+    isBoss: s.isBot ? s.isBoss : false,
+    isRival: s.isBot ? s.isRival : false,
+    isGarrison: s.isBot ? s.garrisonOutpost !== null : false,
+    shipClass: s.isBot ? 'sloop' : s.economy.shipClass,
+    x: s.body.x,
+    z: s.body.z,
+    heading: s.body.heading,
+    speed: s.body.speed,
+    health: s.health,
+    maxHealth: s.maxHealth,
+    loadout: s.loadout,
+    alive: s.alive,
+    sailDisabled: s.sailDisableTimer > 0,
+    burning: s.burnTicksRemaining > 0,
+    protectedFromDamage: room.isShipProtected(s),
+  }));
+  const cannonballsSnapshot: CannonballSnapshot[] = room.cannonballs.map((b) => ({
+    id: b.id,
+    x: b.x,
+    y: b.y,
+    z: b.z,
+    ammoType: b.ammoType,
+  }));
+  const cratesSnapshot: CrateInfo[] = room.crates
+    .filter((c) => !c.collected)
+    .map((c) => ({ id: c.id, x: c.x, z: c.z, value: c.value }));
+  const salvageSnapshot: SalvageInfo[] = room.salvage.map((p) => ({
+    id: p.id,
+    x: p.x,
+    z: p.z,
+    value: p.value,
+    ownerName: p.ownerName,
+  }));
+
+  for (const ship of room.ships.values()) {
+    if (ship.isBot || ship.disconnectedAt !== null) continue;
+    const you = room.buildEconomySnapshot(ship);
+    send(ship.socket, {
+      type: 'state',
+      ships: shipsSnapshot,
+      cannonballs: cannonballsSnapshot,
+      crates: cratesSnapshot,
+      salvage: salvageSnapshot,
+      // Viewer-relative (which outposts are *yours*, what tithe is waiting),
+      // so unlike the other arrays this one is built per recipient.
+      outposts: room.buildOutpostSnapshot(ship),
+      you,
+    });
+
+    const personalEvents = room.events.filter((e) => !('for' in e) || e.for === undefined || e.for === ship.id);
+    if (personalEvents.length > 0) send(ship.socket, { type: 'events', events: personalEvents });
+  }
+
+  room.clearEvents();
+}
+
+function shutdown() {
+  flushSync();
+  flushWorldSync();
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
